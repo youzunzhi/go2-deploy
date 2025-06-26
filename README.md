@@ -1,222 +1,171 @@
-# GO2 运动控制部署项目
+# GO2-Deploy
 
-这是一个基于ROS2的GO2机器人运动控制部署项目，从Extreme-Parkour-Onboard项目迁移而来，专注于机器人的运动控制能力。
+GO2机器人运动控制策略部署系统 - 基于Extreme-Parkour-Onboard项目
+
+## 项目概述
+
+本项目是从Extreme-Parkour-Onboard项目迁移而来的GO2机器人运动控制策略部署系统。系统采用模块化设计，支持多种运行模式，具备完整的日志记录、性能监控和部署自动化功能。
+
+## 运动模式切换API
+
+### 运动模式切换机制 (Go2 1.1.7+)
+
+本项目使用新的`motion_switcher` API来控制机器人的运动模式：
+
+#### API参数
+
+| 功能 | API ID | 参数 |
+|------|--------|------|
+| 关闭运动模式 | 1003 | `{}` |
+| 开启运动模式 | 1002 | `{"name": "mcf"}` |
+
+#### 代码示例
+
+```python
+def publish_motion_switcher(self, mode: int):
+    """发布运动模式切换命令（Go2 1.1.7+）"""
+    msg = Request()
+    msg.header.identity.id = 0
+    msg.header.lease.id = 0
+    msg.header.policy.priority = 0
+    msg.header.policy.noreply = False
+    
+    if mode == 0:
+        # 释放模式（切换到普通模式）
+        msg.header.identity.api_id = 1003
+        msg.parameter = '{}'
+    elif mode == 1:
+        # 选择MCF模式（运动模式）
+        msg.header.identity.api_id = 1002
+        msg.parameter = '{"name": "mcf"}'
+    
+    msg.binary = []
+    self.motion_switcher_pub.publish(msg)
+```
 
 ## 项目结构
 
 ```
 go2-deploy/
-├── constants.py          # 常量定义（机器人配置、API常量等）
-├── utils.py             # 工具函数（安全检查、状态机、性能监控等）
-├── config.py            # 配置管理（机器人配置、部署配置等）
-├── robot_controller.py  # 机器人控制基类
-├── state_manager.py     # 状态管理器
-├── ros_interface.py     # ROS2接口模块
-├── run_loco_policy.py   # 主运行脚本（待实现）
-└── README.md           # 项目说明文档
+├── constants.py          # 常量定义（包含运动模式切换API）
+├── config.py            # 配置管理
+├── utils.py             # 工具函数
+├── robot_controller.py  # 机器人控制器（支持运动模式切换）
+├── state_manager.py     # 状态管理器（集成运动模式切换）
+├── ros_interface.py     # ROS2接口（支持motion_switcher API）
+├── model_manager.py     # 模型管理
+├── inference_engine.py  # 推理引擎
+├── logger.py            # 日志系统
+├── deploy.py            # 部署自动化
+├── run_loco_policy.py   # 主运行脚本
+└── README.md            # 项目文档
 ```
 
-## 设计哲学
+## 核心功能
 
-### 1. 模块化设计
-- **分离关注点**: 控制逻辑、状态管理、通信接口分别独立
-- **可扩展性**: 每个模块都可以独立扩展和优化
-- **可测试性**: 模块间松耦合，便于单元测试
+### 1. 运动模式切换
 
-### 2. 安全优先
-- **多层安全检查**: 关节限位、动作范围、紧急停止
-- **实时监控**: 持续监控机器人状态，及时发现问题
-- **优雅降级**: 异常情况下安全切换到备用模式
+- **运动模式**: 使用手柄直接控制机器人运动
+- **站立策略**: 使用AI策略保持机器人站立平衡
+- **运动控制策略**: 使用训练好的神经网络进行复杂运动控制
+- **模式切换**: 支持实时切换，使用`motion_switcher` API
 
-### 3. 性能优化
-- **异步处理**: 非阻塞的通信和控制循环
-- **内存管理**: 高效的数据缓冲和缓存策略
-- **实时性**: 优化的控制周期和响应时间
+### 2. 安全机制
 
-### 4. 配置驱动
-- **灵活配置**: 支持多种配置文件和参数
-- **运行时调整**: 支持动态参数调整
-- **环境适配**: 适应不同的部署环境
+- **关节限制检查**: 防止关节超出安全范围
+- **紧急停止**: 异常情况下自动停止机器人
+- **安全检查器**: 实时监控机器人状态
 
-## 核心组件
+### 3. 性能监控
 
-### 1. 机器人控制器 (`robot_controller.py`)
-- **状态管理**: 管理机器人的各种状态和模式
-- **安全检查**: 实时监控关节位置和动作安全
-- **性能监控**: 跟踪控制循环的性能指标
-- **动作执行**: 安全地发送动作到机器人
+- **推理时间**: 监控神经网络推理性能
+- **控制周期**: 确保稳定的控制频率
+- **系统健康**: 监控整体系统状态
 
-### 2. 状态管理器 (`state_manager.py`)
-- **模式切换**: 在运动模式、站立模式、运动控制模式间切换
-- **手柄处理**: 处理无线手柄的输入命令
-- **回调系统**: 支持状态变化的回调处理
-- **状态追踪**: 记录和报告当前状态信息
+### 4. 日志记录
 
-### 3. 配置管理 (`config.py`)
-- **机器人配置**: 关节参数、控制增益、限位等
-- **部署配置**: 设备选择、运行模式、性能参数等
-- **动态加载**: 支持配置文件的动态加载和更新
+- **系统日志**: 记录运行状态和错误信息
+- **性能日志**: 记录性能指标和统计数据
+- **健康监控**: 监控系统健康状态
 
-### 4. 工具函数 (`utils.py`)
-- **安全检查器**: 关节限位检查、违规计数、紧急停止
-- **状态机**: 状态转换逻辑和验证
-- **性能计时器**: 精确的性能测量和统计
-- **数学工具**: 坐标转换、角度计算等
+## 安装和配置
 
-### 5. 模型管理器 (`model_manager.py`)
-- **模型加载**: 支持JIT模型和权重文件的加载
-- **深度编码器**: 58x87分辨率深度图像处理
-- **循环编码器**: 时序特征提取和RNN处理
-- **模型预热**: 避免首次推理延迟
-- **性能监控**: 详细的推理时间统计
+### 1. 环境要求
 
-### 6. 推理引擎 (`inference_engine.py`)
-- **完整推理流水线**: 从观察到动作的端到端处理
-- **观察处理**: 本体感受、深度特征、历史信息的整合
-- **性能优化**: 批量处理、内存管理、GPU加速
-- **状态管理**: 推理状态的重置和恢复
-- **异常处理**: 推理失败时的安全降级
-
-### 7. 主运行脚本 (`run_loco_policy.py`)
-- **完整控制循环**: 定时器和while循环两种模式
-- **组件整合**: 统一管理所有系统组件
-- **信号处理**: 优雅的启动和关闭
-- **性能监控**: 实时性能统计和报告
-- **错误恢复**: 异常情况下的自动恢复
-
-### 8. 日志和监控系统 (`logger.py`)
-- **系统日志器**: 多级别日志记录和文件输出
-- **性能监控器**: 详细的性能指标收集和统计
-- **健康监控器**: 系统组件健康状态检查
-- **错误报告**: 自动错误记录和报告生成
-- **数据导出**: CSV格式的性能数据导出
-
-### 9. 部署工具 (`deploy.py`)
-- **自动化部署**: 一键部署和配置
-- **依赖管理**: 自动安装Python依赖
-- **模型验证**: 检查模型文件的完整性
-- **服务管理**: systemd服务文件生成
-- **监控脚本**: 进程状态监控工具
-
-## 开发计划
-
-### 第一阶段 ✅ 完成
-- [x] 基础项目结构
-- [x] 常量定义和配置管理
-- [x] 工具函数和安全检查机制
-- [x] 项目文档
-
-### 第二阶段 ✅ 完成
-- [x] 机器人控制基类
-- [x] 状态管理器
-- [x] ROS2接口模块
-- [x] 模块化架构设计
-
-### 第三阶段 ✅ 完成
-- [x] 模型加载和推理逻辑
-- [x] 观察空间处理
-- [x] 动作空间处理
-- [x] 推理性能优化
-- [x] 模型管理器
-- [x] 推理引擎
-- [x] 深度编码器集成
-
-### 第四阶段 ✅ 完成
-- [x] 主运行脚本
-- [x] 完整的控制循环
-- [x] 错误处理和恢复
-- [x] 日志和监控系统
-- [x] 部署脚本和工具
-- [x] 系统健康监控
-
-### 第五阶段 📋 计划中
-- [ ] 性能测试和优化
-- [ ] 安全测试和验证
-- [ ] 用户指南和示例
-- [ ] 故障排除文档
-
-## 使用说明
-
-### 环境要求
 - Python 3.8+
 - ROS2 Humble
 - PyTorch 1.12+
-- CUDA 11.0+ (可选，用于GPU加速)
+- CUDA 11.6+ (可选，用于GPU加速)
+- Go2软件版本 1.1.7+
 
-### 快速开始
+### 2. 依赖安装
 
-#### 1. 克隆项目
 ```bash
-git clone <repository-url>
-cd go2-deploy
+# 安装Python依赖
+pip install torch torchvision torchaudio
+pip install numpy opencv-python
+pip install rclpy
+
+# 安装ROS2依赖
+sudo apt install ros-humble-unitree-ros2
 ```
 
-#### 2. 安装依赖
-```bash
-# 自动安装依赖
-python3 deploy.py --model_dir /path/to/models
+### 3. 模型文件
 
-# 或手动安装
-pip install torch numpy rclpy
+将训练好的模型文件放置在指定目录：
+
+```
+traced/
+├── base_jit.pt          # 基础模型
+├── vision_weight.pt     # 视觉模型权重
+└── config.json          # 模型配置
 ```
 
-#### 3. 运行程序
+## 使用方法
 
-**基本运行:**
+### 1. 基本运行
+
 ```bash
-python3 run_loco_policy.py --model_dir /path/to/models
+# 使用默认配置运行
+python run_loco_policy.py
+
+# 指定模型目录
+python run_loco_policy.py --model_dir ./traced
+
+# 使用GPU加速
+python run_loco_policy.py --device cuda
+
+# 真实模式（非干运行）
+python run_loco_policy.py --nodryrun
 ```
 
-**完整参数运行:**
+### 2. 运行模式
+
 ```bash
-python3 run_loco_policy.py \
-    --model_dir /path/to/models \
-    --device cuda \
-    --duration 0.02 \
-    --mode locomotion \
-    --loop_mode timer \
-    --logdir ./logs \
-    --nodryrun
+# 运动模式
+python run_loco_policy.py --mode sport
+
+# 站立策略
+python run_loco_policy.py --mode stand
+
+# 运动控制策略
+python run_loco_policy.py --mode locomotion
+
+# 行走模式
+python run_loco_policy.py --mode walk
 ```
 
-**使用部署脚本:**
-```bash
-# 部署
-python3 deploy.py --model_dir /path/to/models --log_dir ./logs
+### 3. 控制循环模式
 
-# 运行
-./deploy/run.sh
+```bash
+# 定时器模式（推荐）
+python run_loco_policy.py --loop_mode timer
+
+# 循环模式
+python run_loco_policy.py --loop_mode while
 ```
 
-### 命令行参数
-
-| 参数 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `--model_dir` | str | None | 模型目录路径 |
-| `--device` | str | cuda | 推理设备 (cuda/cpu) |
-| `--duration` | float | 0.02 | 控制周期(秒) |
-| `--nodryrun` | flag | False | 禁用干运行模式 |
-| `--mode` | str | locomotion | 运行模式 |
-| `--loop_mode` | str | timer | 控制循环模式 |
-| `--logdir` | str | None | 日志目录路径 |
-
-### 运行模式
-
-#### 1. 运动模式 (Sport Mode)
-- 使用手柄直接控制机器人
-- 支持站立、坐下、平衡站立等基本动作
-- 按 `L1` 切换到站立策略
-
-#### 2. 站立策略 (Stand Policy)
-- 自动站立控制
-- 按 `Y` 切换到运动控制策略
-
-#### 3. 运动控制策略 (Locomotion Policy)
-- 使用训练好的模型进行运动控制
-- 支持深度图像输入
-- 按 `L2` 切换回运动模式
-
-### 手柄控制
+### 4. 手柄控制
 
 | 按钮 | 功能 |
 |------|------|
@@ -227,39 +176,27 @@ python3 deploy.py --model_dir /path/to/models --log_dir ./logs
 | Y | 切换到运动控制策略 |
 | L2 | 切换回运动模式 |
 
-### 日志和监控
+## 部署自动化
 
-#### 查看日志
+### 1. 自动部署
+
 ```bash
-# 实时日志
-tail -f logs/go2_deploy_*.log
+# 运行部署脚本
+python deploy.py
 
-# 性能数据
-cat logs/performance_*.csv
-
-# 错误报告
-cat logs/error_report_*.json
+# 指定配置
+python deploy.py --config deploy_config.yaml
 ```
 
-#### 系统监控
-```bash
-# 使用内置监控
-python3 deploy/monitor.py
+### 2. 部署功能
 
-# 查看系统状态
-systemctl status go2-locomotion
-```
+- **环境检查**: 验证系统环境和依赖
+- **模型验证**: 检查模型文件完整性
+- **服务安装**: 创建systemd服务
+- **监控脚本**: 生成监控和重启脚本
 
-### 部署为系统服务
+### 3. 服务管理
 
-#### 1. 安装服务
-```bash
-sudo cp deploy/go2-locomotion.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable go2-locomotion
-```
-
-#### 2. 管理服务
 ```bash
 # 启动服务
 sudo systemctl start go2-locomotion
@@ -274,122 +211,137 @@ sudo systemctl status go2-locomotion
 sudo journalctl -u go2-locomotion -f
 ```
 
-### 故障排除
+## 配置说明
 
-#### 常见问题
+### 1. 机器人配置
 
-1. **模型加载失败**
-   - 检查模型目录路径是否正确
-   - 确认模型文件是否存在 (base_jit.pt, vision_weight.pt, config.json)
-   - 检查CUDA版本兼容性
+```python
+# config.py
+class RobotConfiguration:
+    # 机器人参数
+    num_dof = 12
+    num_actions = 12
+    
+    # 关节限制
+    joint_limits_low = [-0.802851, -1.0472, -2.69653, ...]
+    joint_limits_high = [0.802851, 4.18879, -0.916298, ...]
+    
+    # 控制参数
+    lin_vel_deadband = 0.1
+    ang_vel_deadband = 0.1
+```
 
-2. **ROS2连接失败**
-   - 确认ROS2环境已正确设置
-   - 检查网络连接
-   - 验证机器人IP地址
+### 2. 部署配置
 
-3. **性能问题**
-   - 检查GPU使用率
-   - 调整控制周期
-   - 查看性能日志
+```python
+# config.py
+class DeploymentConfig:
+    # 设备配置
+    device = "cuda"
+    dryrun = True
+    
+    # 控制参数
+    duration = 0.02
+    safety_ratio = 1.1
+    
+    # 日志配置
+    logdir = "./logs"
+    log_level = "INFO"
+```
 
-4. **安全违规**
-   - 检查关节限位设置
-   - 调整安全比例参数
-   - 查看安全日志
+## 故障排除
 
-#### 调试模式
+### 1. 常见问题
+
+**Q: 运动模式无法切换？**
+A: 确保Go2软件版本为1.1.7+，检查ROS2连接状态
+
+**Q: 推理速度慢？**
+A: 检查是否使用GPU，调整模型预热参数
+
+**Q: 控制不稳定？**
+A: 检查控制周期设置，确保系统负载正常
+
+### 2. 日志分析
+
+```bash
+# 查看系统日志
+tail -f logs/system.log
+
+# 查看性能日志
+tail -f logs/performance.log
+
+# 查看错误日志
+grep "ERROR" logs/system.log
+```
+
+### 3. 性能调优
+
+- **控制周期**: 根据硬件性能调整`duration`参数
+- **模型预热**: 增加预热次数提高推理稳定性
+- **安全检查**: 调整`safety_ratio`参数
+
+## 开发指南
+
+### 1. 添加新功能
+
+1. 在相应模块中添加功能
+2. 更新配置和常量
+3. 添加测试用例
+4. 更新文档
+
+### 2. 调试模式
+
 ```bash
 # 启用调试日志
-export ROS_LOG_LEVEL=DEBUG
-python3 run_loco_policy.py --model_dir /path/to/models
+python run_loco_policy.py --log_level DEBUG
+
+# 使用模拟接口
+python run_loco_policy.py --dryrun
 ```
 
-#### 性能分析
+### 3. 测试
+
 ```bash
-# 查看性能统计
-python3 -c "
-from logger import SystemLogger
-logger = SystemLogger('./logs')
-logger.print_performance_summary()
-"
+# 运行单元测试
+python -m pytest tests/
+
+# 运行集成测试
+python tests/test_integration.py
 ```
 
-## 安全特性
+## 版本历史
 
-### 1. 关节限位保护
-- 实时监控所有关节位置
-- 防止超出安全范围的动作
-- 违规计数和自动停止
+### v1.0.0 (当前版本)
+- 完成基础功能迁移
+- 实现运动模式切换API
+- 添加完整的日志和监控系统
+- 支持部署自动化
 
-### 2. 动作范围检查
-- 验证动作命令的合理性
-- 防止过大的动作幅度
-- 平滑的动作过渡
-
-### 3. 紧急停止机制
-- 多级安全检查
-- 快速响应异常情况
-- 安全的降级策略
-
-### 4. 状态监控
-- 持续监控机器人状态
-- 异常检测和报告
-- 自动恢复机制
-
-## 性能特性
-
-### 1. 实时控制
-- 优化的控制循环
-- 低延迟的响应时间
-- 稳定的控制频率
-
-### 2. 内存优化
-- 高效的数据结构
-- 最小化内存分配
-- 智能的缓存策略
-
-### 3. 计算优化
-- GPU加速支持
-- 批量处理优化
-- 并行计算利用
-
-## 扩展性
-
-### 1. 新机器人支持
-- 模块化的机器人接口
-- 配置驱动的参数设置
-- 插件式的功能扩展
-
-### 2. 新算法集成
-- 标准化的推理接口
-- 灵活的模型加载
-- 可配置的处理流程
-
-### 3. 新功能添加
-- 事件驱动的架构
-- 回调机制支持
-- 插件系统设计
+### 计划功能
+- 支持更多机器人型号
+- 添加Web界面
+- 实现远程监控
+- 支持多机器人集群
 
 ## 贡献指南
 
-1. Fork 项目
+1. Fork项目
 2. 创建功能分支
 3. 提交更改
-4. 推送到分支
-5. 创建 Pull Request
+4. 创建Pull Request
 
 ## 许可证
 
-本项目采用 MIT 许可证 - 查看 [LICENSE](LICENSE) 文件了解详情。
+本项目基于MIT许可证开源。
 
 ## 联系方式
 
 如有问题或建议，请通过以下方式联系：
-- 提交 Issue
+- 提交Issue
 - 发送邮件
 - 参与讨论
 
 ---
 
-**注意**: 这是一个正在开发中的项目，部分功能可能尚未完全实现。请在使用前仔细阅读文档并进行充分测试。 
+**注意**: 使用本系统前请确保了解机器人安全操作规范，建议在安全环境下进行测试。确保Go2软件版本为1.1.7或更高。 

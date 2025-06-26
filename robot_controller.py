@@ -6,7 +6,7 @@ from rclpy.node import Node
 import torch
 import numpy as np
 import time
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 
 from constants import RobotConfig, ObservationConfig, ControlConfig, RunMode
 from utils import get_euler_xyz, get_crc, PerformanceTimer, StateMachine, SafetyChecker
@@ -94,6 +94,19 @@ class RobotController(Node):
                 self.deploy_config.warm_up_iterations
             )
         
+        # ROS接口
+        self.ros_interface = None
+        
+        # 控制参数
+        self.lin_vel_deadband = ControlConfig.lin_vel_deadband
+        self.ang_vel_deadband = ControlConfig.ang_vel_deadband
+        self.cmd_px_range = ControlConfig.cmd_px_range
+        self.cmd_nx_range = ControlConfig.cmd_nx_range
+        self.cmd_py_range = ControlConfig.cmd_py_range
+        self.cmd_ny_range = ControlConfig.cmd_ny_range
+        self.cmd_pyaw_range = ControlConfig.cmd_pyaw_range
+        self.cmd_nyaw_range = ControlConfig.cmd_nyaw_range
+        
         # 数据缓冲区
         self._init_buffers()
         
@@ -105,7 +118,7 @@ class RobotController(Node):
         
         # 安全状态
         self.safety_violations = 0
-        self.max_safety_violations = 5
+        self.max_safety_violations = 10
         
         # 性能监控
         self.control_cycle_count = 0
@@ -128,7 +141,7 @@ class RobotController(Node):
         self.episode_length_buf = torch.zeros(
             1, device=self.device, dtype=torch.float
         )
-        self.depth_latent_yaw_buffer = torch.zeros(
+        self.forward_depth_latent_yaw_buffer = torch.zeros(
             1, self.n_depth_latent + 2, 
             device=self.device, dtype=torch.float
         )
@@ -203,6 +216,46 @@ class RobotController(Node):
         
         self.first_run_target_1 = True
         self.first_run = True
+    
+    def set_ros_interface(self, ros_interface):
+        """设置ROS接口"""
+        self.ros_interface = ros_interface
+        self.get_logger().info("ROS接口已设置")
+    
+    def set_inference_engine(self, inference_engine):
+        """设置推理引擎"""
+        self.inference_engine = inference_engine
+        self.get_logger().info("推理引擎已设置")
+    
+    def switch_to_sport_mode(self):
+        """切换到运动模式"""
+        if self.state_machine.transition_to("sport_mode"):
+            self.get_logger().info("切换到运动模式")
+            
+            # 通过ROS接口发布运动模式切换命令
+            if self.ros_interface:
+                self.ros_interface.publish_motion_switcher(1)  # 选择MCF模式
+            
+            return True
+        return False
+    
+    def switch_to_normal_mode(self):
+        """切换到普通模式"""
+        if self.state_machine.transition_to("normal_mode"):
+            self.get_logger().info("切换到普通模式")
+            
+            # 通过ROS接口发布运动模式切换命令
+            if self.ros_interface:
+                self.ros_interface.publish_motion_switcher(0)  # 释放模式
+            
+            return True
+        return False
+    
+    def publish_sport_mode_command(self, mode_id: int):
+        """发布运动模式命令"""
+        if self.ros_interface:
+            self.ros_interface.publish_sport_mode(mode_id)
+            self.get_logger().info(f"发布运动模式命令: {mode_id}")
     
     def initialize_inference_engine(self) -> bool:
         """
@@ -533,7 +586,7 @@ class RobotController(Node):
         self.actions = torch.zeros(self.num_actions, device=self.device, dtype=torch.float32)
         self.proprio_history_buf = torch.zeros(1, self.n_hist_len, self.n_proprio, device=self.device, dtype=torch.float)
         self.episode_length_buf = torch.zeros(1, device=self.device, dtype=torch.float)
-        self.depth_latent_yaw_buffer = torch.zeros(1, self.n_depth_latent + 2, device=self.device, dtype=torch.float)
+        self.forward_depth_latent_yaw_buffer = torch.zeros(1, self.n_depth_latent + 2, device=self.device, dtype=torch.float)
         self.xyyaw_command = torch.tensor([[0, 0, 0]], device=self.device, dtype=torch.float32)
         self.contact_filt = torch.ones((1, 4), device=self.device, dtype=torch.float32)
         self.last_contact_filt = torch.ones((1, 4), device=self.device, dtype=torch.float32)

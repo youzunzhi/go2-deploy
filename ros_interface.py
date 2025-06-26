@@ -6,6 +6,7 @@ from rclpy.node import Node
 import torch
 import numpy as np
 from typing import Optional, Callable, Any
+from constants import MOTION_SWITCHER_API_ID_RELEASE, MOTION_SWITCHER_API_ID_SELECT_MCF
 
 # 注意：这些导入需要根据实际的ROS2包进行调整
 # from unitree_go.msg import WirelessController, LowState, LowCmd
@@ -34,8 +35,8 @@ class ROSInterface:
         self.low_cmd_topic = "/lowcmd"
         self.joy_stick_topic = "/wirelesscontroller"
         self.depth_data_topic = "/forward_depth_image"
-        self.sport_state_topic = "/api/robot_state/request"
         self.sport_mode_topic = "/api/sport/request"
+        self.motion_switcher_topic = "/api/motion_switcher/request"
         
         # 缓冲区
         self.low_state_buffer = None
@@ -47,8 +48,8 @@ class ROSInterface:
         self.low_state_sub = None
         self.joy_stick_sub = None
         self.depth_input_sub = None
-        self.sport_state_pub = None
         self.sport_mode_pub = None
+        self.motion_switcher_pub = None
         
         # 回调函数
         self.state_callbacks: list[Callable] = []
@@ -77,11 +78,11 @@ class ROSInterface:
         # self.low_cmd_pub = self.node.create_publisher(
         #     LowCmd, self.low_cmd_topic, 1
         # )
-        # self.sport_state_pub = self.node.create_publisher(
-        #     Request, self.sport_state_topic, 1
-        # )
         # self.sport_mode_pub = self.node.create_publisher(
         #     Request, self.sport_mode_topic, 1
+        # )
+        # self.motion_switcher_pub = self.node.create_publisher(
+        #     Request, self.motion_switcher_topic, 1
         # )
         
         self.node.get_logger().info("ROS发布者创建完成")
@@ -244,30 +245,44 @@ class ROSInterface:
         except Exception as e:
             self.node.get_logger().error(f"发布运动模式命令失败: {e}")
     
-    def publish_sport_state(self, state: int):
-        """发布运动状态命令"""
-        if not self.initialized or self.sport_state_pub is None:
+    def publish_motion_switcher(self, mode: int):
+        """
+        发布运动模式切换命令（Go2 1.1.7+）
+        
+        Args:
+            mode: 0=释放模式（切换到普通模式），1=选择MCF模式
+        """
+        if not self.initialized or self.motion_switcher_pub is None:
             return
         
         try:
             # 注意：这里需要根据实际的ROS2消息结构进行调整
             # msg = Request()
+            # 
+            # # 填充头部
             # msg.header.identity.id = 0
-            # msg.header.identity.api_id = 1001
             # msg.header.lease.id = 0
             # msg.header.policy.priority = 0
             # msg.header.policy.noreply = False
             # 
-            # if state == 0:
-            #     msg.parameter = '{"name":"sport_mode","switch":0}'
-            # elif state == 1:
-            #     msg.parameter = '{"name":"sport_mode","switch":1}'
+            # if mode == 0:
+            #     # 释放模式（切换到普通模式）- 使用api_id 1003
+            #     msg.header.identity.api_id = MOTION_SWITCHER_API_ID_RELEASE
+            #     msg.parameter = '{}'
+            # elif mode == 1:
+            #     # 选择MCF模式 - 使用api_id 1002
+            #     msg.header.identity.api_id = MOTION_SWITCHER_API_ID_SELECT_MCF
+            #     msg.parameter = '{"name": "mcf"}'
             # 
             # msg.binary = []
-            # self.sport_state_pub.publish(msg)
+            # 
+            # # 发布到motion_switcher
+            # self.motion_switcher_pub.publish(msg)
+            
+            self.node.get_logger().info(f"发布运动模式切换命令: mode={mode}")
             pass
         except Exception as e:
-            self.node.get_logger().error(f"发布运动状态命令失败: {e}")
+            self.node.get_logger().error(f"发布运动模式切换命令失败: {e}")
     
     def wait_for_messages(self, timeout: float = 10.0) -> bool:
         """

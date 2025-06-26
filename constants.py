@@ -35,73 +35,71 @@ ROBOT_SPORT_API_ID_FRONTFLIP = 1030
 ROBOT_SPORT_API_ID_FRONTJUMP = 1031
 ROBOT_SPORT_API_ID_FRONTPOUNCE = 1032
 
-# 机器人配置常量
+# 运动模式切换API ID (Go2 1.1.7+)
+MOTION_SWITCHER_API_ID_RELEASE = 1003  # 释放模式，切换到普通模式
+MOTION_SWITCHER_API_ID_SELECT_MCF = 1002  # 选择MCF模式
+
+# 手柄按钮定义
+class WirelessButtons:
+    """无线手柄按钮定义"""
+    L1 = 0x0001
+    L2 = 0x0002
+    R1 = 0x0004
+    R2 = 0x0008
+    X = 0x0010
+    Y = 0x0020
+    A = 0x0040
+    B = 0x0080
+    UP = 0x0100
+    DOWN = 0x0200
+    LEFT = 0x0400
+    RIGHT = 0x0800
+    SELECT = 0x1000
+    START = 0x2000
+    HOME = 0x4000
+    L3 = 0x8000
+    R3 = 0x10000
+
+# 机器人配置
 class RobotConfig:
-    """机器人配置常量"""
-    num_dof = 12  # 自由度数量
-    num_actions = 12  # 动作维度
-    
-    # 关节映射 The order of joints has been reindexed in simulation. So we do not need here.
+    """机器人配置"""
+    num_dof = 12
+    num_actions = 12
     dof_map = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
-    
-    # 关节名称
     dof_names = [
-        "FR_hip_joint",    # 前右髋关节
-        "FR_thigh_joint",  # 前右大腿关节
-        "FR_calf_joint",   # 前右小腿关节
-        "FL_hip_joint",    # 前左髋关节
-        "FL_thigh_joint",  # 前左大腿关节
-        "FL_calf_joint",   # 前左小腿关节
-        "RR_hip_joint",    # 后右髋关节
-        "RR_thigh_joint",  # 后右大腿关节
-        "RR_calf_joint",   # 后右小腿关节
-        "RL_hip_joint",    # 后左髋关节
-        "RL_thigh_joint",  # 后左大腿关节
-        "RL_calf_joint",   # 后左小腿关节
+        "FL_hip_joint", "FL_thigh_joint", "FL_calf_joint",
+        "FR_hip_joint", "FR_thigh_joint", "FR_calf_joint", 
+        "RL_hip_joint", "RL_thigh_joint", "RL_calf_joint",
+        "RR_hip_joint", "RR_thigh_joint", "RR_calf_joint"
     ]
+    dof_signs = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+    turn_on_motor_mode = [10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10]
     
-    # 关节方向符号
-    dof_signs = [1.0] * 12
-    
-    # 关节限位 (高)
-    joint_limits_high = [
-        1.0472, 3.4907, -0.83776,  # FR
-        1.0472, 3.4907, -0.83776,  # FL
-        1.0472, 4.5379, -0.83776,  # RR
-        1.0472, 4.5379, -0.83776,  # RL
-    ]
-    
-    # 关节限位 (低)
-    joint_limits_low = [
-        -1.0472, -1.5708, -2.7227,  # FR
-        -1.0472, -1.5708, -2.7227,  # FL
-        -1.0472, -0.5236, -2.7227,  # RR
-        -1.0472, -0.5236, -2.7227,  # RL
-    ]
-    
-    # 扭矩限位
-    torque_limits = [
-        25, 40, 40,  # FR
-        25, 40, 40,  # FL
-        25, 40, 40,  # RR
-        25, 40, 40,  # RL
-    ]
-    
-    # 电机模式
-    turn_on_motor_mode = [0x01] * 12
+    # 关节限制
+    joint_limits_low = [-0.802851, -1.0472, -2.69653, -0.802851, -1.0472, -2.69653,
+                       -0.802851, -1.0472, -2.69653, -0.802851, -1.0472, -2.69653]
+    joint_limits_high = [0.802851, 4.18879, -0.916298, 0.802851, 4.18879, -0.916298,
+                        0.802851, 4.18879, -0.916298, 0.802851, 4.18879, -0.916298]
 
 # 观察空间配置
 class ObservationConfig:
     """观察空间配置"""
-    n_proprio = 53        # 本体感受维度
-    n_depth_latent = 32   # 深度特征维度
-    n_hist_len = 10       # 历史长度
+    n_proprio = 53
+    n_depth_latent = 32
+    n_hist_len = 10
 
 # 控制配置
 class ControlConfig:
     """控制配置"""
-    default_duration = 0.02  # 默认控制周期 (20ms)
-    visual_update_interval = 5  # 视觉更新间隔
+    visual_update_interval = 5
+    lin_vel_deadband = 0.1
+    ang_vel_deadband = 0.1
+    cmd_px_range = [0.4, 1.0]
+    cmd_nx_range = [0.4, 0.8]
+    cmd_py_range = [0.4, 0.8]
+    cmd_ny_range = [0.4, 0.8]
+    cmd_pyaw_range = [0.4, 1.6]
+    cmd_nyaw_range = [0.4, 1.6]
 
 # 运行模式
 class RunMode:

@@ -24,9 +24,9 @@ class RobotStateManager:
         self.global_counter = 0
         self.visual_update_interval = ControlConfig.visual_update_interval
         
-        # 回调函数
+        # 回调函数 - 运动模式切换回调系统
         self.sport_mode_callbacks: Dict[str, Callable] = {}
-        self.state_change_callbacks: Dict[str, Callable] = {}
+        self.sport_mode_switcher_callbacks: Dict[str, Callable] = {}
         
         # 性能监控
         self.mode_start_time = time.monotonic()
@@ -36,9 +36,9 @@ class RobotStateManager:
         """注册运动模式回调"""
         self.sport_mode_callbacks[mode] = callback
     
-    def register_state_change_callback(self, state: str, callback: Callable):
-        """注册状态变化回调"""
-        self.state_change_callbacks[state] = callback
+    def register_sport_mode_switcher_callback(self, state: str, callback: Callable):
+        """注册运动模式切换回调（包含硬件切换和应用逻辑）"""
+        self.sport_mode_switcher_callbacks[state] = callback
     
     def handle_joystick_input(self, joy_stick_buffer) -> bool:
         """
@@ -120,8 +120,8 @@ class RobotStateManager:
             # 重置计数器
             self.global_counter = 0
             
-            # 执行状态变化回调
-            self._execute_state_change_callback("sport_mode")
+            # 执行运动模式切换回调（包含硬件切换和应用逻辑）
+            self._execute_sport_mode_switcher_callback("sport_mode")
             
             print("切换到运动模式")
     
@@ -132,8 +132,8 @@ class RobotStateManager:
             self.use_stand_policy = True
             self.use_locomotion_policy = False
             
-            # 执行状态变化回调
-            self._execute_state_change_callback("stand_policy")
+            # 执行运动模式切换回调（包含硬件切换和应用逻辑）
+            self._execute_sport_mode_switcher_callback("stand_policy")
             
             print("切换到站立策略")
     
@@ -147,18 +147,18 @@ class RobotStateManager:
             # 重置计数器
             self.global_counter = 0
             
-            # 执行状态变化回调
-            self._execute_state_change_callback("locomotion_policy")
+            # 执行运动模式切换回调（包含硬件切换和应用逻辑）
+            self._execute_sport_mode_switcher_callback("locomotion_policy")
             
             print("切换到运动控制策略")
     
-    def _execute_state_change_callback(self, state: str):
-        """执行状态变化回调"""
-        if state in self.state_change_callbacks:
+    def _execute_sport_mode_switcher_callback(self, state: str):
+        """执行运动模式切换回调（统一处理硬件切换和应用逻辑）"""
+        if state in self.sport_mode_switcher_callbacks:
             try:
-                self.state_change_callbacks[state]()
+                self.sport_mode_switcher_callbacks[state]()
             except Exception as e:
-                print(f"执行状态变化回调失败: {e}")
+                print(f"执行运动模式切换回调失败: {e}")
     
     def update_counter(self):
         """更新计数器"""
@@ -224,10 +224,10 @@ class ModeController:
         self.state_manager.register_sport_mode_callback("standdown", self._sport_standdown)
         self.state_manager.register_sport_mode_callback("balancestand", self._sport_balancestand)
         
-        # 状态变化回调
-        self.state_manager.register_state_change_callback("sport_mode", self._on_sport_mode)
-        self.state_manager.register_state_change_callback("stand_policy", self._on_stand_policy)
-        self.state_manager.register_state_change_callback("locomotion_policy", self._on_locomotion_policy)
+        # 运动模式切换回调（包含硬件切换和应用逻辑）
+        self.state_manager.register_sport_mode_switcher_callback("sport_mode", self._on_sport_mode)
+        self.state_manager.register_sport_mode_switcher_callback("stand_policy", self._on_stand_policy)
+        self.state_manager.register_sport_mode_switcher_callback("locomotion_policy", self._on_locomotion_policy)
     
     def _sport_standup(self):
         """运动模式：站立"""
@@ -245,19 +245,38 @@ class ModeController:
         # TODO: 实现具体的平衡站立命令
     
     def _on_sport_mode(self):
-        """进入运动模式"""
+        """进入运动模式（统一处理硬件切换和应用逻辑）"""
         print("进入运动模式")
+        
+        # 硬件切换：切换到MCF模式
+        if hasattr(self.robot_controller, 'ros_interface'):
+            print("切换到MCF模式（运动模式）")
+            self.robot_controller.ros_interface.publish_motion_switcher(1)
+        
+        # 应用逻辑：重置观察
         self.robot_controller.reset_obs()
-        # TODO: 实现运动模式初始化
+        # TODO: 实现其他运动模式初始化
     
     def _on_stand_policy(self):
-        """进入站立策略"""
+        """进入站立策略（统一处理硬件切换和应用逻辑）"""
         print("进入站立策略")
+        
+        # 硬件切换：释放运动模式
+        if hasattr(self.robot_controller, 'ros_interface'):
+            print("切换到普通模式（释放运动模式）")
+            self.robot_controller.ros_interface.publish_motion_switcher(0)
+        
         # TODO: 实现站立策略初始化
     
     def _on_locomotion_policy(self):
-        """进入运动控制策略"""
+        """进入运动控制策略（统一处理硬件切换和应用逻辑）"""
         print("进入运动控制策略")
+        
+        # 硬件切换：释放运动模式
+        if hasattr(self.robot_controller, 'ros_interface'):
+            print("切换到普通模式（释放运动模式）")
+            self.robot_controller.ros_interface.publish_motion_switcher(0)
+        
         # TODO: 实现运动控制策略初始化
     
     def execute_current_mode(self, joy_stick_buffer):
