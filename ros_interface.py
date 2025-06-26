@@ -17,18 +17,18 @@ from constants import MOTION_SWITCHER_API_ID_RELEASE, MOTION_SWITCHER_API_ID_SEL
 class ROSInterface:
     """ROS2接口类"""
     
-    def __init__(self, node: Node, robot_controller, state_manager):
+    def __init__(self, node: Node, robot_controller, mode_manager=None):
         """
         初始化ROS接口
         
         Args:
             node: ROS2节点
             robot_controller: 机器人控制器
-            state_manager: 状态管理器
+            mode_manager: 模式管理器
         """
         self.node = node
         self.robot_controller = robot_controller
-        self.state_manager = state_manager
+        self.mode_manager = mode_manager
         
         # 话题名称
         self.low_state_topic = "/lowstate"
@@ -330,8 +330,8 @@ class ROSInterface:
 class MockROSInterface(ROSInterface):
     """模拟ROS接口，用于测试"""
     
-    def __init__(self, node: Node, robot_controller, state_manager):
-        super().__init__(node, robot_controller, state_manager)
+    def __init__(self, node: Node, robot_controller, mode_manager):
+        super().__init__(node, robot_controller, mode_manager)
         
         # 模拟数据
         self._mock_low_state()

@@ -16,7 +16,6 @@ from typing import Optional
 from constants import RunMode
 from config import RobotConfiguration, DeploymentConfig
 from robot_controller import RobotController, WirelessButtons
-from state_manager import RobotStateManager, ModeController
 from ros_interface import ROSInterface
 from inference_engine import InferenceEngine
 from logger import SystemLogger, HealthMonitor
@@ -96,17 +95,6 @@ class LocomotionPolicyRunner(Node):
                 deploy_config=self.deploy_config
             )
             self.system_logger.info("机器人控制器初始化完成")
-            
-            # 初始化状态管理器
-            self.state_manager = RobotStateManager()
-            self.system_logger.info("状态管理器初始化完成")
-            
-            # 初始化模式控制器
-            self.mode_controller = ModeController(
-                self.robot_controller, 
-                self.state_manager
-            )
-            self.system_logger.info("模式控制器初始化完成")
             
             # 初始化ROS接口
             self.ros_interface = ROSInterface(self.robot_controller)
@@ -219,8 +207,8 @@ class LocomotionPolicyRunner(Node):
             # 获取手柄输入
             joy_stick_buffer = self.ros_interface.get_joystick_buffer()
             
-            # 执行当前模式
-            self.mode_controller.execute_current_mode(joy_stick_buffer)
+            # 让robot_controller处理模式切换和动作
+            self.robot_controller.run_current_mode(joy_stick_buffer)
             
             # 更新性能统计
             self.cycle_count += 1
@@ -272,7 +260,7 @@ class LocomotionPolicyRunner(Node):
         self.system_logger.performance_monitor.update_metric("safety_violations", safety_violations)
         
         # 记录模式变化
-        mode_info = self.mode_controller.get_mode_info()
+        mode_info = self.mode_manager.get_mode_info()
         if mode_info["mode_duration"] < 1.0:  # 新切换的模式
             self.system_logger.performance_monitor.increment_metric("mode_changes")
     
@@ -308,7 +296,7 @@ class LocomotionPolicyRunner(Node):
             self.inference_engine.print_performance_stats()
         
         # 打印模式信息
-        mode_info = self.mode_controller.get_mode_info()
+        mode_info = self.mode_manager.get_mode_info()
         print(f"当前模式: {mode_info['current_state']}")
         print(f"模式持续时间: {mode_info['mode_duration']:.1f}s")
         print(f"全局计数器: {mode_info['global_counter']}")

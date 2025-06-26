@@ -35,7 +35,7 @@ class WirelessButtons:
 
 
 class RobotController(Node):
-    """机器人控制基类"""
+    """机器人控制基类，集成主控模式管理"""
     
     def __init__(self, 
                  robot_name: str = "go2",
@@ -127,6 +127,12 @@ class RobotController(Node):
         # 推理相关
         self.global_counter = 0
         self.visual_update_interval = ControlConfig.visual_update_interval
+        
+        # 主控模式管理
+        self.current_mode = "native_sport_mode"
+        self.use_native_sport_mode = True
+        self.use_stand_policy_mode = False
+        self.use_locomotion_policy_mode = False
         
         self.get_logger().info(f"机器人控制器初始化完成: {robot_name}")
         self.get_logger().info(f"设备: {self.device}, 干运行模式: {self.dryrun}")
@@ -226,32 +232,6 @@ class RobotController(Node):
         """设置推理引擎"""
         self.inference_engine = inference_engine
         self.get_logger().info("推理引擎已设置")
-    
-    def switch_to_native_sport_mode(self):
-        """切换到Go2原生运动主模式"""
-        if self.state_machine.transition_to("native_sport_mode"):
-            self.get_logger().info("切换到Go2原生运动主模式")
-            if self.ros_interface:
-                self.ros_interface.publish_motion_switcher(1)
-            return True
-        return False
-    
-    def switch_to_stand_policy_mode(self):
-        """切换到自定义站立主模式"""
-        if self.state_machine.transition_to("stand_policy_mode"):
-            self.get_logger().info("切换到自定义站立主模式")
-            if self.ros_interface:
-                self.ros_interface.publish_motion_switcher(0)
-            return True
-        return False
-    
-    def switch_to_locomotion_policy_mode(self):
-        """切换到自定义locomotion主模式"""
-        if self.state_machine.transition_to("locomotion_policy_mode"):
-            self.get_logger().info("切换到自定义locomotion主模式")
-            # 这里可根据需要添加相关逻辑
-            return True
-        return False
     
     def initialize_inference_engine(self) -> bool:
         """
@@ -613,4 +593,137 @@ class RobotController(Node):
         
         # 打印推理引擎性能
         if self.inference_engine:
-            self.inference_engine.print_performance_stats() 
+            self.inference_engine.print_performance_stats()
+
+    # 主控模式相关方法
+    def get_joystick_command(self, joy_stick_buffer) -> Optional[str]:
+        if not hasattr(joy_stick_buffer, 'keys'):
+            return None
+        if self.use_native_sport_mode:
+            if (joy_stick_buffer.keys & WirelessButtons.R1):
+                return "standup"
+            elif (joy_stick_buffer.keys & WirelessButtons.R2):
+                return "standdown"
+            elif (joy_stick_buffer.keys & WirelessButtons.X):
+                return "balancestand"
+            elif (joy_stick_buffer.keys & WirelessButtons.L1):
+                return "stand_policy_mode"
+        else:
+            if (joy_stick_buffer.keys & WirelessButtons.Y):
+                return "locomotion_policy_mode"
+            elif (joy_stick_buffer.keys & WirelessButtons.L2):
+                return "native_sport_mode"
+        return None
+
+    def switch_to_native_sport_mode(self):
+        if self.current_mode != "native_sport_mode":
+            self.current_mode = "native_sport_mode"
+            self.use_native_sport_mode = True
+            self.use_stand_policy_mode = False
+            self.use_locomotion_policy_mode = False
+            self.get_logger().info("切换到Go2原生运动主模式")
+            if self.ros_interface:
+                self.ros_interface.publish_motion_switcher(1)
+            if hasattr(self, 'reset_obs'):
+                self.reset_obs()
+            self.get_logger().info("运动模式初始化完成")
+
+    def switch_to_stand_policy_mode(self):
+        if self.current_mode != "stand_policy_mode":
+            self.current_mode = "stand_policy_mode"
+            self.use_native_sport_mode = False
+            self.use_stand_policy_mode = True
+            self.use_locomotion_policy_mode = False
+            self.get_logger().info("切换到自定义站立主模式")
+            if self.ros_interface:
+                self.ros_interface.publish_motion_switcher(0)
+            if hasattr(self, 'get_stand_action') and hasattr(self, 'send_stand_action'):
+                stand_action = self.get_stand_action()
+                self.send_stand_action(stand_action)
+            self.get_logger().info("站立策略初始化完成")
+
+    def switch_to_locomotion_policy_mode(self):
+        if self.current_mode != "locomotion_policy_mode":
+            self.current_mode = "locomotion_policy_mode"
+            self.use_native_sport_mode = False
+            self.use_stand_policy_mode = False
+            self.use_locomotion_policy_mode = True
+            self.get_logger().info("切换到自定义locomotion主模式")
+            if self.ros_interface:
+                self.ros_interface.publish_motion_switcher(0)
+            if hasattr(self, 'reset_obs'):
+                self.reset_obs()
+            self.get_logger().info("运动控制策略初始化完成")
+
+    def run_current_mode(self, joy_stick_buffer):
+        cmd = self.get_joystick_command(joy_stick_buffer)
+        if cmd == "standup":
+            self._standup()
+        elif cmd == "standdown":
+            self._standdown()
+        elif cmd == "balancestand":
+            self._balancestand()
+        elif cmd == "stand_policy_mode":
+            self.switch_to_stand_policy_mode()
+        elif cmd == "locomotion_policy_mode":
+            self.switch_to_locomotion_policy_mode()
+        elif cmd == "native_sport_mode":
+            self.switch_to_native_sport_mode()
+        # 自动控制逻辑
+        if self.use_native_sport_mode:
+            pass
+        elif self.use_stand_policy_mode:
+            self._run_stand_policy_mode()
+        elif self.use_locomotion_policy_mode:
+            self._run_locomotion_policy_mode()
+
+    def _standup(self):
+        self.get_logger().info("执行运动模式：站立")
+        if self.ros_interface:
+            self.ros_interface.publish_sport_mode(ROBOT_SPORT_API_ID_STANDUP)
+        else:
+            self.get_logger().warning("ROS接口未初始化，无法发送站立命令")
+
+    def _standdown(self):
+        self.get_logger().info("执行运动模式：坐下")
+        if self.ros_interface:
+            self.ros_interface.publish_sport_mode(ROBOT_SPORT_API_ID_STANDDOWN)
+        else:
+            self.get_logger().warning("ROS接口未初始化，无法发送坐下命令")
+
+    def _balancestand(self):
+        self.get_logger().info("执行运动模式：平衡站立")
+        if self.ros_interface:
+            self.ros_interface.publish_sport_mode(ROBOT_SPORT_API_ID_BALANCESTAND)
+        else:
+            self.get_logger().warning("ROS接口未初始化，无法发送平衡站立命令")
+
+    def _run_stand_policy_mode(self):
+        stand_action = self.get_stand_action()
+        self.send_stand_action(stand_action)
+
+    def _run_locomotion_policy_mode(self):
+        try:
+            action = self.execute_locomotion_policy()
+            self.send_action(action)
+        except Exception as e:
+            self.get_logger().error(f"运动控制策略执行失败: {e}")
+            self.switch_to_native_sport_mode()
+
+    def get_current_mode(self) -> str:
+        return self.current_mode
+
+    def get_mode_info(self) -> Dict[str, Any]:
+        return {
+            "current_mode": self.current_mode,
+            "use_native_sport_mode": self.use_native_sport_mode,
+            "use_stand_policy_mode": self.use_stand_policy_mode,
+            "use_locomotion_policy_mode": self.use_locomotion_policy_mode
+        }
+
+    def reset_mode(self):
+        self.current_mode = "native_sport_mode"
+        self.use_native_sport_mode = True
+        self.use_stand_policy_mode = False
+        self.use_locomotion_policy_mode = False
+        self.get_logger().info("主控模式已重置") 

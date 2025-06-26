@@ -14,7 +14,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from constants import MOTION_SWITCHER_API_ID_RELEASE, MOTION_SWITCHER_API_ID_SELECT_MCF
 from ros_interface import ROSInterface
 from robot_controller import RobotController
-from state_manager import RobotStateManager
+from robot_mode_manager import RobotModeManager
 
 
 class MotionSwitcherTester(Node):
@@ -25,8 +25,8 @@ class MotionSwitcherTester(Node):
         
         # 初始化组件
         self.robot_controller = RobotController(robot_name="go2_test")
-        self.state_manager = RobotStateManager()
-        self.ros_interface = ROSInterface(self, self.robot_controller, self.state_manager)
+        self.robot_mode_manager = RobotModeManager(self.robot_controller)
+        self.ros_interface = ROSInterface(self, self.robot_controller, self.robot_mode_manager)
         
         # 设置ROS接口
         self.robot_controller.set_ros_interface(self.ros_interface)
@@ -68,22 +68,22 @@ class MotionSwitcherTester(Node):
         try:
             # 测试切换到运动模式
             self.get_logger().info("测试切换到运动模式")
-            self.state_manager.switch_to_native_sport_mode()
+            self.robot_mode_manager.switch_to_native_sport_mode()
             time.sleep(2)
             
             # 测试切换到站立策略
             self.get_logger().info("测试切换到站立策略")
-            self.state_manager.switch_to_stand_policy_mode()
+            self.robot_mode_manager.switch_to_stand_policy_mode()
             time.sleep(2)
             
             # 测试切换到运动控制策略
             self.get_logger().info("测试切换到运动控制策略")
-            self.state_manager.switch_to_locomotion_policy_mode()
+            self.robot_mode_manager.switch_to_locomotion_policy_mode()
             time.sleep(2)
             
             # 测试切换回运动模式
             self.get_logger().info("测试切换回运动模式")
-            self.state_manager.switch_to_native_sport_mode()
+            self.robot_mode_manager.switch_to_native_sport_mode()
             time.sleep(2)
             
             self.get_logger().info("状态管理器集成测试完成")

@@ -79,30 +79,6 @@ class PerformanceTimer:
             prev_time = time
 
 
-class StateMachine:
-    """简单的状态机"""
-    
-    def __init__(self, initial_state):
-        self.current_state = initial_state
-        self.state_history = [initial_state]
-    
-    def transition_to(self, new_state):
-        """状态转换"""
-        if new_state != self.current_state:
-            self.current_state = new_state
-            self.state_history.append(new_state)
-            return True
-        return False
-    
-    def get_current_state(self):
-        """获取当前状态"""
-        return self.current_state
-    
-    def get_state_history(self):
-        """获取状态历史"""
-        return self.state_history.copy()
-
-
 class SafetyChecker:
     """安全检查器"""
     
