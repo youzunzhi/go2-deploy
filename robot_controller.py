@@ -227,35 +227,31 @@ class RobotController(Node):
         self.inference_engine = inference_engine
         self.get_logger().info("推理引擎已设置")
     
-    def switch_to_sport_mode(self):
-        """切换到运动模式"""
-        if self.state_machine.transition_to("sport_mode"):
-            self.get_logger().info("切换到运动模式")
-            
-            # 通过ROS接口发布运动模式切换命令
+    def switch_to_native_sport_mode(self):
+        """切换到Go2原生运动主模式"""
+        if self.state_machine.transition_to("native_sport_mode"):
+            self.get_logger().info("切换到Go2原生运动主模式")
             if self.ros_interface:
-                self.ros_interface.publish_motion_switcher(1)  # 选择MCF模式
-            
+                self.ros_interface.publish_motion_switcher(1)
             return True
         return False
     
-    def switch_to_normal_mode(self):
-        """切换到普通模式"""
-        if self.state_machine.transition_to("normal_mode"):
-            self.get_logger().info("切换到普通模式")
-            
-            # 通过ROS接口发布运动模式切换命令
+    def switch_to_stand_policy_mode(self):
+        """切换到自定义站立主模式"""
+        if self.state_machine.transition_to("stand_policy_mode"):
+            self.get_logger().info("切换到自定义站立主模式")
             if self.ros_interface:
-                self.ros_interface.publish_motion_switcher(0)  # 释放模式
-            
+                self.ros_interface.publish_motion_switcher(0)
             return True
         return False
     
-    def publish_sport_mode_command(self, mode_id: int):
-        """发布运动模式命令"""
-        if self.ros_interface:
-            self.ros_interface.publish_sport_mode(mode_id)
-            self.get_logger().info(f"发布运动模式命令: {mode_id}")
+    def switch_to_locomotion_policy_mode(self):
+        """切换到自定义locomotion主模式"""
+        if self.state_machine.transition_to("locomotion_policy_mode"):
+            self.get_logger().info("切换到自定义locomotion主模式")
+            # 这里可根据需要添加相关逻辑
+            return True
+        return False
     
     def initialize_inference_engine(self) -> bool:
         """

@@ -69,6 +69,13 @@ go2-deploy/
 - **站立策略**: 使用AI策略保持机器人站立平衡
 - **运动控制策略**: 使用训练好的神经网络进行复杂运动控制
 - **模式切换**: 支持实时切换，使用`motion_switcher` API
+- **主控模式切换**：
+  - `native_sport_mode`：Go2原生运动主模式（通过官方API控制）
+  - `stand_policy_mode`：自定义站立主模式
+  - `locomotion_policy_mode`：自定义locomotion主模式（训练得到的policy控制）
+- **回调注册**：
+  - `native_sport_action_callbacks`：Go2原生运动模式下的具体动作（如站立、趴下、平衡等）
+  - `main_mode_switch_callbacks`：主控模式切换时的回调（如切换到native_sport_mode/stand_policy_mode/locomotion_policy_mode时的硬件和应用逻辑）
 
 ### 2. 安全机制
 

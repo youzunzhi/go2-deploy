@@ -68,22 +68,22 @@ class MotionSwitcherTester(Node):
         try:
             # 测试切换到运动模式
             self.get_logger().info("测试切换到运动模式")
-            self.state_manager.switch_to_sport_mode()
+            self.state_manager.switch_to_native_sport_mode()
             time.sleep(2)
             
             # 测试切换到站立策略
             self.get_logger().info("测试切换到站立策略")
-            self.state_manager.switch_to_stand_policy()
+            self.state_manager.switch_to_stand_policy_mode()
             time.sleep(2)
             
             # 测试切换到运动控制策略
             self.get_logger().info("测试切换到运动控制策略")
-            self.state_manager.switch_to_locomotion_policy()
+            self.state_manager.switch_to_locomotion_policy_mode()
             time.sleep(2)
             
             # 测试切换回运动模式
             self.get_logger().info("测试切换回运动模式")
-            self.state_manager.switch_to_sport_mode()
+            self.state_manager.switch_to_native_sport_mode()
             time.sleep(2)
             
             self.get_logger().info("状态管理器集成测试完成")
