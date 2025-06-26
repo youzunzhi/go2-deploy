@@ -11,6 +11,7 @@ from typing import Optional, Dict, Any, List
 from constants import RobotConfig, ObservationConfig, ControlConfig, RunMode
 from utils import get_euler_xyz, get_crc, PerformanceTimer, StateMachine, SafetyChecker
 from config import RobotConfiguration, DeploymentConfig
+from inference_engine import InferenceEngine
 
 
 class WirelessButtons:
@@ -84,6 +85,15 @@ class RobotController(Node):
             self.deploy_config.safety_ratio
         )
         
+        # 推理引擎
+        self.inference_engine = None
+        if hasattr(self.deploy_config, 'model_dir') and self.deploy_config.model_dir:
+            self.inference_engine = InferenceEngine(
+                self.deploy_config.model_dir,
+                self.device,
+                self.deploy_config.warm_up_iterations
+            )
+        
         # 数据缓冲区
         self._init_buffers()
         
@@ -100,6 +110,10 @@ class RobotController(Node):
         # 性能监控
         self.control_cycle_count = 0
         self.last_control_time = time.monotonic()
+        
+        # 推理相关
+        self.global_counter = 0
+        self.visual_update_interval = ControlConfig.visual_update_interval
         
         self.get_logger().info(f"机器人控制器初始化完成: {robot_name}")
         self.get_logger().info(f"设备: {self.device}, 干运行模式: {self.dryrun}")
@@ -189,6 +203,28 @@ class RobotController(Node):
         
         self.first_run_target_1 = True
         self.first_run = True
+    
+    def initialize_inference_engine(self) -> bool:
+        """
+        初始化推理引擎
+        
+        Returns:
+            bool: 是否成功初始化
+        """
+        if self.inference_engine is None:
+            self.get_logger().warn("推理引擎未配置")
+            return False
+        
+        try:
+            success = self.inference_engine.initialize()
+            if success:
+                self.get_logger().info("推理引擎初始化成功")
+            else:
+                self.get_logger().error("推理引擎初始化失败")
+            return success
+        except Exception as e:
+            self.get_logger().error(f"推理引擎初始化异常: {e}")
+            return False
     
     def check_safety(self, joint_positions: torch.Tensor) -> bool:
         """
@@ -366,6 +402,53 @@ class RobotController(Node):
         """获取深度图像"""
         return self.depth_data
     
+    def execute_locomotion_policy(self) -> torch.Tensor:
+        """
+        执行运动控制策略
+        
+        Returns:
+            torch.Tensor: 动作
+        """
+        if self.inference_engine is None:
+            self.get_logger().error("推理引擎未初始化")
+            return torch.zeros(self.num_actions, device=self.device, dtype=torch.float32)
+        
+        start_time = time.monotonic()
+        
+        # 获取本体感受
+        proprio = self.get_proprio()
+        get_pro_time = time.monotonic()
+        
+        # 获取历史本体感受
+        proprio_history = self.get_history_proprio()
+        get_hist_pro_time = time.monotonic()
+        
+        # 处理深度图像
+        depth_image = None
+        if self.global_counter % self.visual_update_interval == 0:
+            depth_image = self.get_depth_image()
+            if self.global_counter == 0:
+                self.last_depth_image = depth_image
+        
+        # 执行推理
+        action = self.inference_engine.inference_step(
+            proprio, depth_image, self.global_counter
+        )
+        
+        policy_time = time.monotonic()
+        
+        # 记录性能
+        self.get_logger().debug(
+            f"推理性能 - 本体感受: {(get_pro_time - start_time)*1000:.2f}ms, "
+            f"历史: {(get_hist_pro_time - get_pro_time)*1000:.2f}ms, "
+            f"推理: {(policy_time - get_hist_pro_time)*1000:.2f}ms, "
+            f"总计: {(policy_time - start_time)*1000:.2f}ms"
+        )
+        
+        self.global_counter += 1
+        
+        return action
+    
     def send_action(self, actions: torch.Tensor):
         """
         发送动作到机器人
@@ -455,8 +538,15 @@ class RobotController(Node):
         self.contact_filt = torch.ones((1, 4), device=self.device, dtype=torch.float32)
         self.last_contact_filt = torch.ones((1, 4), device=self.device, dtype=torch.float32)
         
+        # 重置推理引擎
+        if self.inference_engine:
+            self.inference_engine.reset()
+        
         # 重置安全计数器
         self.safety_violations = 0
+        
+        # 重置计数器
+        self.global_counter = 0
         
         self.get_logger().info("观察状态已重置")
     
@@ -470,4 +560,8 @@ class RobotController(Node):
             self.get_logger().info(f"平均控制周期时间: {avg_cycle_time:.5f}s")
         
         self.get_logger().info(f"安全违规次数: {self.safety_violations}/{self.max_safety_violations}")
-        self.get_logger().info(f"当前状态: {self.state_machine.get_current_state()}") 
+        self.get_logger().info(f"当前状态: {self.state_machine.get_current_state()}")
+        
+        # 打印推理引擎性能
+        if self.inference_engine:
+            self.inference_engine.print_performance_stats() 

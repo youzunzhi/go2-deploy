@@ -185,6 +185,7 @@ class DeploymentConfig:
         self.mode = RunMode.LOCOMOTION  # 运行模式
         self.loop_mode = "timer"  # 循环模式
         self.logdir = None  # 日志目录
+        self.model_dir = None  # 模型目录
         
         # 性能配置
         self.visual_update_interval = ControlConfig.visual_update_interval
@@ -208,6 +209,8 @@ class DeploymentConfig:
             self.loop_mode = args.loop_mode
         if hasattr(args, 'logdir'):
             self.logdir = args.logdir
+        if hasattr(args, 'model_dir'):
+            self.model_dir = args.model_dir
     
     def print_config(self):
         """打印部署配置"""
@@ -218,6 +221,7 @@ class DeploymentConfig:
         print(f"  运行模式: {self.mode}")
         print(f"  循环模式: {self.loop_mode}")
         print(f"  日志目录: {self.logdir}")
+        print(f"  模型目录: {self.model_dir}")
         print(f"  视觉更新间隔: {self.visual_update_interval}")
         print(f"  预热迭代次数: {self.warm_up_iterations}")
         print(f"  安全检查比例: {self.safety_ratio}")

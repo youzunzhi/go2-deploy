@@ -290,9 +290,20 @@ class ModeController:
     
     def _execute_locomotion_policy(self):
         """执行运动控制策略"""
-        # 这里需要外部提供推理函数
-        # 暂时使用占位符
-        pass
+        try:
+            # 执行推理
+            action = self.robot_controller.execute_locomotion_policy()
+            
+            # 发送动作
+            self.robot_controller.send_action(action)
+            
+            # 更新计数器
+            self.state_manager.update_counter()
+            
+        except Exception as e:
+            print(f"运动控制策略执行失败: {e}")
+            # 发生异常时切换到运动模式
+            self.state_manager.switch_to_sport_mode()
     
     def get_mode_info(self) -> Dict[str, Any]:
         """获取模式信息"""

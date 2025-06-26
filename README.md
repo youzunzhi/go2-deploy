@@ -63,6 +63,41 @@ go2-deploy/
 - **性能计时器**: 精确的性能测量和统计
 - **数学工具**: 坐标转换、角度计算等
 
+### 5. 模型管理器 (`model_manager.py`)
+- **模型加载**: 支持JIT模型和权重文件的加载
+- **深度编码器**: 58x87分辨率深度图像处理
+- **循环编码器**: 时序特征提取和RNN处理
+- **模型预热**: 避免首次推理延迟
+- **性能监控**: 详细的推理时间统计
+
+### 6. 推理引擎 (`inference_engine.py`)
+- **完整推理流水线**: 从观察到动作的端到端处理
+- **观察处理**: 本体感受、深度特征、历史信息的整合
+- **性能优化**: 批量处理、内存管理、GPU加速
+- **状态管理**: 推理状态的重置和恢复
+- **异常处理**: 推理失败时的安全降级
+
+### 7. 主运行脚本 (`run_loco_policy.py`)
+- **完整控制循环**: 定时器和while循环两种模式
+- **组件整合**: 统一管理所有系统组件
+- **信号处理**: 优雅的启动和关闭
+- **性能监控**: 实时性能统计和报告
+- **错误恢复**: 异常情况下的自动恢复
+
+### 8. 日志和监控系统 (`logger.py`)
+- **系统日志器**: 多级别日志记录和文件输出
+- **性能监控器**: 详细的性能指标收集和统计
+- **健康监控器**: 系统组件健康状态检查
+- **错误报告**: 自动错误记录和报告生成
+- **数据导出**: CSV格式的性能数据导出
+
+### 9. 部署工具 (`deploy.py`)
+- **自动化部署**: 一键部署和配置
+- **依赖管理**: 自动安装Python依赖
+- **模型验证**: 检查模型文件的完整性
+- **服务管理**: systemd服务文件生成
+- **监控脚本**: 进程状态监控工具
+
 ## 开发计划
 
 ### 第一阶段 ✅ 完成
@@ -77,23 +112,28 @@ go2-deploy/
 - [x] ROS2接口模块
 - [x] 模块化架构设计
 
-### 第三阶段 🔄 进行中
-- [ ] 模型加载和推理逻辑
-- [ ] 观察空间处理
-- [ ] 动作空间处理
-- [ ] 推理性能优化
+### 第三阶段 ✅ 完成
+- [x] 模型加载和推理逻辑
+- [x] 观察空间处理
+- [x] 动作空间处理
+- [x] 推理性能优化
+- [x] 模型管理器
+- [x] 推理引擎
+- [x] 深度编码器集成
 
-### 第四阶段 📋 计划中
-- [ ] 主运行脚本
-- [ ] 完整的控制循环
-- [ ] 错误处理和恢复
-- [ ] 日志和监控系统
+### 第四阶段 ✅ 完成
+- [x] 主运行脚本
+- [x] 完整的控制循环
+- [x] 错误处理和恢复
+- [x] 日志和监控系统
+- [x] 部署脚本和工具
+- [x] 系统健康监控
 
 ### 第五阶段 📋 计划中
 - [ ] 性能测试和优化
 - [ ] 安全测试和验证
-- [ ] 部署脚本和文档
 - [ ] 用户指南和示例
+- [ ] 故障排除文档
 
 ## 使用说明
 
@@ -103,18 +143,176 @@ go2-deploy/
 - PyTorch 1.12+
 - CUDA 11.0+ (可选，用于GPU加速)
 
-### 安装依赖
+### 快速开始
+
+#### 1. 克隆项目
 ```bash
+git clone <repository-url>
+cd go2-deploy
+```
+
+#### 2. 安装依赖
+```bash
+# 自动安装依赖
+python3 deploy.py --model_dir /path/to/models
+
+# 或手动安装
 pip install torch numpy rclpy
 ```
 
-### 运行示例
-```bash
-# 启动ROS2节点
-python3 robot_controller.py
+#### 3. 运行程序
 
-# 运行状态管理器
-python3 state_manager.py
+**基本运行:**
+```bash
+python3 run_loco_policy.py --model_dir /path/to/models
+```
+
+**完整参数运行:**
+```bash
+python3 run_loco_policy.py \
+    --model_dir /path/to/models \
+    --device cuda \
+    --duration 0.02 \
+    --mode locomotion \
+    --loop_mode timer \
+    --logdir ./logs \
+    --nodryrun
+```
+
+**使用部署脚本:**
+```bash
+# 部署
+python3 deploy.py --model_dir /path/to/models --log_dir ./logs
+
+# 运行
+./deploy/run.sh
+```
+
+### 命令行参数
+
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `--model_dir` | str | None | 模型目录路径 |
+| `--device` | str | cuda | 推理设备 (cuda/cpu) |
+| `--duration` | float | 0.02 | 控制周期(秒) |
+| `--nodryrun` | flag | False | 禁用干运行模式 |
+| `--mode` | str | locomotion | 运行模式 |
+| `--loop_mode` | str | timer | 控制循环模式 |
+| `--logdir` | str | None | 日志目录路径 |
+
+### 运行模式
+
+#### 1. 运动模式 (Sport Mode)
+- 使用手柄直接控制机器人
+- 支持站立、坐下、平衡站立等基本动作
+- 按 `L1` 切换到站立策略
+
+#### 2. 站立策略 (Stand Policy)
+- 自动站立控制
+- 按 `Y` 切换到运动控制策略
+
+#### 3. 运动控制策略 (Locomotion Policy)
+- 使用训练好的模型进行运动控制
+- 支持深度图像输入
+- 按 `L2` 切换回运动模式
+
+### 手柄控制
+
+| 按钮 | 功能 |
+|------|------|
+| R1 | 站立 |
+| R2 | 坐下 |
+| X | 平衡站立 |
+| L1 | 切换到站立策略 |
+| Y | 切换到运动控制策略 |
+| L2 | 切换回运动模式 |
+
+### 日志和监控
+
+#### 查看日志
+```bash
+# 实时日志
+tail -f logs/go2_deploy_*.log
+
+# 性能数据
+cat logs/performance_*.csv
+
+# 错误报告
+cat logs/error_report_*.json
+```
+
+#### 系统监控
+```bash
+# 使用内置监控
+python3 deploy/monitor.py
+
+# 查看系统状态
+systemctl status go2-locomotion
+```
+
+### 部署为系统服务
+
+#### 1. 安装服务
+```bash
+sudo cp deploy/go2-locomotion.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable go2-locomotion
+```
+
+#### 2. 管理服务
+```bash
+# 启动服务
+sudo systemctl start go2-locomotion
+
+# 停止服务
+sudo systemctl stop go2-locomotion
+
+# 查看状态
+sudo systemctl status go2-locomotion
+
+# 查看日志
+sudo journalctl -u go2-locomotion -f
+```
+
+### 故障排除
+
+#### 常见问题
+
+1. **模型加载失败**
+   - 检查模型目录路径是否正确
+   - 确认模型文件是否存在 (base_jit.pt, vision_weight.pt, config.json)
+   - 检查CUDA版本兼容性
+
+2. **ROS2连接失败**
+   - 确认ROS2环境已正确设置
+   - 检查网络连接
+   - 验证机器人IP地址
+
+3. **性能问题**
+   - 检查GPU使用率
+   - 调整控制周期
+   - 查看性能日志
+
+4. **安全违规**
+   - 检查关节限位设置
+   - 调整安全比例参数
+   - 查看安全日志
+
+#### 调试模式
+```bash
+# 启用调试日志
+export ROS_LOG_LEVEL=DEBUG
+python3 run_loco_policy.py --model_dir /path/to/models
+```
+
+#### 性能分析
+```bash
+# 查看性能统计
+python3 -c "
+from logger import SystemLogger
+logger = SystemLogger('./logs')
+logger.print_performance_summary()
+"
 ```
 
 ## 安全特性
