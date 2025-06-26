@@ -101,4 +101,12 @@ class ObservationConfig:
 class ControlConfig:
     """控制配置"""
     default_duration = 0.02  # 默认控制周期 (20ms)
-    visual_update_interval = 5  # 视觉更新间隔 
+    visual_update_interval = 5  # 视觉更新间隔
+
+# 运行模式
+class RunMode:
+    """运行模式"""
+    SPORT = "sport"           # 运动模式
+    STAND = "stand"           # 站立模式
+    LOCOMOTION = "locomotion" # 运动控制模式
+    WALK = "walk"             # 行走模式 

@@ -5,7 +5,7 @@ import json
 import os
 from collections import OrderedDict
 from typing import Dict, Any, Optional
-from constants import RobotConfig, ObservationConfig, ControlConfig
+from constants import RobotConfig, ObservationConfig, ControlConfig, RunMode
 
 
 class RobotConfiguration:
@@ -58,8 +58,8 @@ class RobotConfiguration:
                 "clip_observations": 10.0,
                 "clip_actions": 1.0,
                 "clip_actions_method": "hard",
-                "clip_actions_high": [1.0] * RobotConfig.NUM_ACTIONS,
-                "clip_actions_low": [-1.0] * RobotConfig.NUM_ACTIONS,
+                "clip_actions_high": [1.0] * RobotConfig.num_actions,
+                "clip_actions_low": [-1.0] * RobotConfig.num_actions,
                 "obs_scales": {
                     "ang_vel": 0.25,
                     "dof_pos": 1.0,
@@ -127,7 +127,7 @@ class RobotConfiguration:
         stiffness_config = self.get("control.stiffness", {})
         gains = []
         
-        for joint_name in RobotConfig.DOF_NAMES:
+        for joint_name in RobotConfig.dof_names:
             gain_found = False
             for key, value in stiffness_config.items():
                 if key in joint_name:
@@ -144,7 +144,7 @@ class RobotConfiguration:
         damping_config = self.get("control.damping", {})
         gains = []
         
-        for joint_name in RobotConfig.DOF_NAMES:
+        for joint_name in RobotConfig.dof_names:
             gain_found = False
             for key, value in damping_config.items():
                 if key in joint_name:
@@ -180,14 +180,14 @@ class DeploymentConfig:
     
     def __init__(self):
         self.device = "cuda"  # 推理设备
-        self.duration = ControlConfig.DEFAULT_DURATION  # 控制周期
+        self.duration = ControlConfig.default_duration  # 控制周期
         self.dryrun = True  # 是否干运行模式
-        self.mode = "parkour"  # 运行模式
+        self.mode = RunMode.LOCOMOTION  # 运行模式
         self.loop_mode = "timer"  # 循环模式
         self.logdir = None  # 日志目录
         
         # 性能配置
-        self.visual_update_interval = ControlConfig.VISUAL_UPDATE_INTERVAL
+        self.visual_update_interval = ControlConfig.visual_update_interval
         self.warm_up_iterations = 2
         
         # 安全配置
