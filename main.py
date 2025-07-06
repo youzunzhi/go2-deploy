@@ -177,6 +177,34 @@ class Go2Node(UnitreeRos2Real):
             self._sport_mode_change(ROBOT_SPORT_API_ID_BALANCESTAND)
 
 
+def handle_timing_mode(env_node, timing_mode, duration):
+    if timing_mode == "ros_timer":
+        # Use ROS timer for timing control
+        env_node.get_logger().info('Model and Policy are ready')
+        env_node.start_main_loop_timer(duration)
+        rclpy.spin(env_node)
+    
+    elif timing_mode == "manual_control":
+        # Manually control timing for more precise control
+        rclpy.spin_once(env_node, timeout_sec=0.)
+        env_node.get_logger().info("Model and Policy are ready")
+        
+        while rclpy.ok():
+            # Track iteration time to maintain desired frequency
+            main_loop_time = time.monotonic()
+            
+            # Run one iteration
+            env_node.main_loop()
+            rclpy.spin_once(env_node, timeout_sec=0.)
+            
+            # Sleep remaining time to maintain frequency
+            sleep_time = max(0, duration - (time.monotonic() - main_loop_time))
+            time.sleep(sleep_time)
+    
+    else:
+        raise ValueError(f"Invalid timing mode: {timing_mode}")
+
+
 @torch.inference_mode()
 def main(args):
     rclpy.init()
@@ -257,20 +285,7 @@ def main(args):
     env_node.start_ros_handlers()
     env_node.warm_up()
 
-    if args.timing_mode == "ros_timer":
-        env_node.get_logger().info('Model and Policy are ready')
-        env_node.start_main_loop_timer(duration)
-        rclpy.spin(env_node)
-    elif args.timing_mode == "manual_control":
-        rclpy.spin_once(env_node, timeout_sec= 0.)
-        env_node.get_logger().info("Model and Policy are ready")
-        while rclpy.ok():
-            main_loop_time = time.monotonic()
-            env_node.main_loop()
-            rclpy.spin_once(env_node, timeout_sec= 0.)
-            time.sleep(max(0, duration - (time.monotonic() - main_loop_time)))
-    else:
-        raise ValueError(f"Invalid timing mode: {args.timing_mode}")
+    handle_timing_mode(env_node, args.timing_mode, duration)
 
     rclpy.shutdown()
 
