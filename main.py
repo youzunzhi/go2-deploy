@@ -24,7 +24,10 @@ import time
 import sys
 import threading
 
-from sport_api_constants import *
+
+ROBOT_SPORT_API_ID_BALANCESTAND = 1002
+ROBOT_SPORT_API_ID_STANDUP = 1004
+ROBOT_SPORT_API_ID_STANDDOWN = 1005
 
 class Go2Node(UnitreeRos2Real):
     def __init__(self, *args, **kwargs):
@@ -80,108 +83,112 @@ class Go2Node(UnitreeRos2Real):
         self.depth_encode = depth_encode
         self.policy = policy
 
-    def start_main_loop_timer(self, duration):
-        self.main_loop_timer = self.create_timer(
-            duration, # in sec
-            self.main_loop,
+
+def start_main_loop_timer(node, duration):
+    """Start the main loop timer for ROS-based timing control"""
+    node.main_loop_timer = node.create_timer(
+        duration, # in sec
+        lambda: main_loop(node),
+    )
+
+
+def main_loop(node):
+    """Main control loop for the Go2 robot - handles different operational modes based on joystick input"""
+    if node.use_sport_mode:
+        if (node.joy_stick_buffer.keys & node.WirelessButtons.R1):
+            node.get_logger().info("In the sport mode, R1 pressed, robot will stand up.")
+            node._sport_mode_change(ROBOT_SPORT_API_ID_STANDUP)
+        if (node.joy_stick_buffer.keys & node.WirelessButtons.R2):
+            node.get_logger().info("In the sport mode, R2 pressed, robot will sit down.")
+            node._sport_mode_change(ROBOT_SPORT_API_ID_STANDDOWN)
+
+        if (node.joy_stick_buffer.keys & node.WirelessButtons.X):
+            node.get_logger().info("In the sport mode, X pressed, robot will balance stand.")
+            node._sport_mode_change(ROBOT_SPORT_API_ID_BALANCESTAND)
+
+        if (node.joy_stick_buffer.keys & node.WirelessButtons.L1):
+            node.get_logger().info("Exist the sport mode. Switch to stand policy.")
+            node.use_sport_mode = False
+            node._sport_state_change(0)
+            node.use_stand_policy = True
+            node.use_parkour_policy = False
+    
+    if node.use_stand_policy:
+        stand_action = node.get_stand_action()
+        node.send_stand_action(stand_action)
+    
+    if (node.joy_stick_buffer.keys & node.WirelessButtons.Y):
+        node.get_logger().info("Y pressed, use the parkour policy")
+        node.use_stand_policy = False
+        node.use_parkour_policy = True
+        node.use_sport_mode = False
+        node.global_counter = 0
+
+    if node.use_parkour_policy:
+        node.use_stand_policy = False
+        node.use_sport_mode = False
+        
+        start_time = time.monotonic()
+
+        proprio = node.get_proprio()
+        get_pro_time = time.monotonic()
+
+        proprio_history = node._get_history_proprio()
+        get_hist_pro_time = time.monotonic()
+
+        # print('proprioception: ', proprio)
+        # print('history proprioception: ', proprio_history)
+
+        if node.global_counter % node.visual_update_interval == 0:
+            depth_image = node._get_depth_image()
+            if node.global_counter == 0:
+                node.last_depth_image = depth_image
+            node.depth_latent_yaw = node.depth_encode(node.last_depth_image, proprio)
+            node.last_depth_image = depth_image
+            # print('depth latent: ', node.depth_latent_yaw)
+        get_obs_time = time.monotonic()
+
+        obs = node.turn_obs(proprio, node.depth_latent_yaw, proprio_history, node.n_proprio, node.n_depth_latent, node.n_hist_len)
+        turn_obs_time = time.monotonic()
+
+        action = node.policy(obs)
+        policy_time = time.monotonic()
+        # print('action before clip and normalize: ', action)
+
+        # action = node.actions_sim[node.sim_ite, :]
+        node.send_action(action)
+        print('action: ', action)
+        node.sim_ite += 1
+
+        publish_time = time.monotonic()
+        print(
+            "get proprio time: {:.5f}".format(get_pro_time - start_time),
+            "get hist pro time: {:.5f}".format(get_hist_pro_time - get_pro_time),
+            "get_depth time: {:.5f}".format(get_obs_time - get_hist_pro_time),
+            "get obs time: {:.5f}".format(get_obs_time - start_time),
+            "turn_obs_time: {:.5f}".format(turn_obs_time - get_obs_time),
+            "policy_time: {:.5f}".format(policy_time - turn_obs_time),
+            "publish_time: {:.5f}".format(publish_time - policy_time),
+            "total time: {:.5f}".format(publish_time - start_time)
         )
-        
-    def main_loop(self):
-        if self.use_sport_mode:
-            if (self.joy_stick_buffer.keys & self.WirelessButtons.R1):
-                self.get_logger().info("In the sport mode, R1 pressed, robot will stand up.")
-                self._sport_mode_change(ROBOT_SPORT_API_ID_STANDUP)
-            if (self.joy_stick_buffer.keys & self.WirelessButtons.R2):
-                self.get_logger().info("In the sport mode, R2 pressed, robot will sit down.")
-                self._sport_mode_change(ROBOT_SPORT_API_ID_STANDDOWN)
 
-            if (self.joy_stick_buffer.keys & self.WirelessButtons.X):
-                self.get_logger().info("In the sport mode, X pressed, robot will balance stand.")
-                self._sport_mode_change(ROBOT_SPORT_API_ID_BALANCESTAND)
+        node.global_counter += 1
 
-            if (self.joy_stick_buffer.keys & self.WirelessButtons.L1):
-                self.get_logger().info("Exist the sport mode. Switch to stand policy.")
-                self.use_sport_mode = False
-                self._sport_state_change(0)
-                self.use_stand_policy = True
-                self.use_parkour_policy = False
-        
-        if self.use_stand_policy:
-            stand_action = self.get_stand_action()
-            self.send_stand_action(stand_action)
-        
-        if (self.joy_stick_buffer.keys & self.WirelessButtons.Y):
-            self.get_logger().info("Y pressed, use the parkour policy")
-            self.use_stand_policy = False
-            self.use_parkour_policy = True
-            self.use_sport_mode = False
-            self.global_counter = 0
-
-        if self.use_parkour_policy:
-            self.use_stand_policy = False
-            self.use_sport_mode = False
-            
-            start_time = time.monotonic()
-
-            proprio = self.get_proprio()
-            get_pro_time = time.monotonic()
-
-            proprio_history = self._get_history_proprio()
-            get_hist_pro_time = time.monotonic()
-
-            # print('proprioception: ', proprio)
-            # print('history proprioception: ', proprio_history)
-
-            if self.global_counter % self.visual_update_interval == 0:
-                depth_image = self._get_depth_image()
-                if self.global_counter == 0:
-                    self.last_depth_image = depth_image
-                self.depth_latent_yaw = self.depth_encode(self.last_depth_image, proprio)
-                self.last_depth_image = depth_image
-                # print('depth latent: ', self.depth_latent_yaw)
-            get_obs_time = time.monotonic()
-
-            obs = self.turn_obs(proprio, self.depth_latent_yaw, proprio_history, self.n_proprio, self.n_depth_latent, self.n_hist_len)
-            turn_obs_time = time.monotonic()
-
-            action = self.policy(obs)
-            policy_time = time.monotonic()
-            # print('action before clip and normalize: ', action)
-
-            # action = self.actions_sim[self.sim_ite, :]
-            self.send_action(action)
-            print('action: ', action)
-            self.sim_ite += 1
-
-            publish_time = time.monotonic()
-            print(
-                "get proprio time: {:.5f}".format(get_pro_time - start_time),
-                "get hist pro time: {:.5f}".format(get_hist_pro_time - get_pro_time),
-                "get_depth time: {:.5f}".format(get_obs_time - get_hist_pro_time),
-                "get obs time: {:.5f}".format(get_obs_time - start_time),
-                "turn_obs_time: {:.5f}".format(turn_obs_time - get_obs_time),
-                "policy_time: {:.5f}".format(policy_time - turn_obs_time),
-                "publish_time: {:.5f}".format(publish_time - policy_time),
-                "total time: {:.5f}".format(publish_time - start_time)
-            )
-
-            self.global_counter += 1
-
-        if (self.joy_stick_buffer.keys & self.WirelessButtons.L2):
-            self.get_logger().info("L2 pressed, stop using parkour policy, switch to sport mode.")
-            self.use_stand_policy = False
-            self.use_parkour_policy = False
-            self.use_sport_mode = True
-            self.reset_obs()
-            self._sport_state_change(1)
-            self._sport_mode_change(ROBOT_SPORT_API_ID_BALANCESTAND)
+    if (node.joy_stick_buffer.keys & node.WirelessButtons.L2):
+        node.get_logger().info("L2 pressed, stop using parkour policy, switch to sport mode.")
+        node.use_stand_policy = False
+        node.use_parkour_policy = False
+        node.use_sport_mode = True
+        node.reset_obs()
+        node._sport_state_change(1)
+        node._sport_mode_change(ROBOT_SPORT_API_ID_BALANCESTAND)
 
 
 def handle_timing_mode(env_node, timing_mode, duration):
     if timing_mode == "ros_timer":
         # Use ROS timer for timing control
         env_node.get_logger().info('Model and Policy are ready')
-        env_node.start_main_loop_timer(duration)
+        start_main_loop_timer(env_node, duration)
         rclpy.spin(env_node)
     
     elif timing_mode == "manual_control":
@@ -194,7 +201,7 @@ def handle_timing_mode(env_node, timing_mode, duration):
             main_loop_time = time.monotonic()
             
             # Run one iteration
-            env_node.main_loop()
+            main_loop(env_node)
             rclpy.spin_once(env_node, timeout_sec=0.)
             
             # Sleep remaining time to maintain frequency
