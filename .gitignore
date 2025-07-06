@@ -1,5 +1,11 @@
 # model files
-traced/*
+*.pt
+*.pth
+*.pkl
+*.ptl
+*.pthl
+*.pkl
+*.ptl
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
