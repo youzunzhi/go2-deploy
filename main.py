@@ -29,60 +29,6 @@ ROBOT_SPORT_API_ID_BALANCESTAND = 1002
 ROBOT_SPORT_API_ID_STANDUP = 1004
 ROBOT_SPORT_API_ID_STANDDOWN = 1005
 
-class Go2Node(UnitreeRos2Real):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, robot_class_name= "Go2", **kwargs)
-        self.global_counter = 0
-        self.visual_update_interval = 5
-
-        self.actions_sim = torch.from_numpy(np.load('Action_sim_335-11_flat.npy')).to(self.model_device)
-
-        self.sim_ite = 3
- 
-        self.use_stand_policy = False
-        self.use_parkour_policy = False
-        self.use_sport_mode = True
-
-    # This warm up is useful in my experiment on Go2
-    # The first two iterations are very slow, but the rest is fast
-    def warm_up(self):
-        for _ in range(2):
-            start_time = time.monotonic()
-
-            proprio = self.get_proprio()
-            get_pro_time = time.monotonic()
-            proprio_history = self._get_history_proprio() 
-            get_hist_pro_time = time.monotonic()
-
-            depth_image = self._get_depth_image()
-            self.depth_latent_yaw = self.depth_encode(depth_image, proprio)
-
-            get_obs_time = time.monotonic()
-
-            obs = self.turn_obs(proprio, self.depth_latent_yaw, proprio_history, self.n_proprio, self.n_depth_latent, self.n_hist_len)
-
-            turn_obs_time = time.monotonic()
-
-            action = self.policy(obs)
-            policy_time = time.monotonic()
-
-            publish_time = time.monotonic()
-            print("warm up: ",
-                "get proprio time: {:.5f}".format(get_pro_time - start_time),
-                "get hist pro time: {:.5f}".format(get_hist_pro_time - get_pro_time),
-                "get_depth time: {:.5f}".format(get_obs_time - get_hist_pro_time),
-                "get obs time: {:.5f}".format(get_obs_time - start_time),
-                "turn_obs_time: {:.5f}".format(turn_obs_time - get_obs_time),
-                "policy_time: {:.5f}".format(policy_time - turn_obs_time),
-                "publish_time: {:.5f}".format(publish_time - policy_time),
-                "total time: {:.5f}".format(publish_time - start_time)
-            )
-
-    def register_models(self, turn_obs, depth_encode, policy):
-        self.turn_obs = turn_obs
-        self.depth_encode = depth_encode
-        self.policy = policy
-
 
 def start_main_loop_timer(node, duration):
     """Start the main loop timer for ROS-based timing control"""
@@ -155,10 +101,8 @@ def main_loop(node):
         policy_time = time.monotonic()
         # print('action before clip and normalize: ', action)
 
-        # action = node.actions_sim[node.sim_ite, :]
         node.send_action(action)
         print('action: ', action)
-        node.sim_ite += 1
 
         publish_time = time.monotonic()
         print(
@@ -226,7 +170,7 @@ def main(args):
     device = "cuda"
     duration = 0.02
 
-    env_node = Go2Node(
+    env_node = UnitreeRos2Real(
         "go2",
         cfg= config_dict,
         model_device= device,
@@ -287,8 +231,6 @@ def main(args):
         return action
 
     env_node.register_models(turn_obs=turn_obs, depth_encode=encode_depth, policy=actor_model)
-
-
     env_node.start_ros_handlers()
     env_node.warm_up()
 
