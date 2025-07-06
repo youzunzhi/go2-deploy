@@ -157,21 +157,17 @@ def handle_timing_mode(env_node, timing_mode, duration):
         raise ValueError(f"Invalid timing mode: {timing_mode}")
 
 
-def load_configuration(logdir):
+def load_json_configuration(config_path):
     """
-    加载训练配置文件和设置控制参数
+    加载JSON格式的配置文件
     
     Args:
-        logdir: 包含配置文件的目录路径
+        config_path: JSON配置文件路径
         
     Returns:
         config_dict: 加载的配置字典
         duration: 控制周期时长
     """
-    assert logdir is not None, "Please provide a logdir"
-    
-    # 加载训练配置文件
-    config_path = osp.join(logdir, "config.json")
     with open(config_path, "r") as f:
         config_dict = json.load(f, object_pairs_hook=OrderedDict)
     
@@ -182,6 +178,74 @@ def load_configuration(logdir):
     duration = 0.02
     
     return config_dict, duration
+
+
+def load_yaml_configuration(params_dir):
+    """
+    加载YAML格式的配置文件（IsaacLab训练产生）
+    
+    Args:
+        params_dir: 包含env.yaml和agent.yaml的目录路径
+        
+    Returns:
+        config_dict: 加载的配置字典
+        duration: 控制周期时长
+    """
+    import yaml
+    
+    # 加载环境配置
+    env_yaml_path = osp.join(params_dir, "env.yaml")
+    agent_yaml_path = osp.join(params_dir, "agent.yaml")
+    
+    assert osp.exists(env_yaml_path), f"Environment config file not found: {env_yaml_path}"
+    assert osp.exists(agent_yaml_path), f"Agent config file not found: {agent_yaml_path}"
+    
+    with open(env_yaml_path, "r") as f:
+        env_config = yaml.safe_load(f)
+    
+    with open(agent_yaml_path, "r") as f:
+        agent_config = yaml.safe_load(f)
+    
+    # 构建配置字典（针对YAML配置的结构）
+    config_dict = OrderedDict()
+    config_dict["env"] = env_config
+    config_dict["agent"] = agent_config
+    config_dict["control"] = {"computer_clip_torque": True}
+    
+    # 设置控制周期 (与JSON配置保持一致)
+    duration = 0.02
+    
+    return config_dict, duration
+
+
+def load_configuration(logdir):
+    """
+    加载训练配置文件和设置控制参数
+    支持JSON和YAML两种格式
+    
+    Args:
+        logdir: 包含配置文件的目录路径
+        
+    Returns:
+        config_dict: 加载的配置字典
+        duration: 控制周期时长
+    """
+    assert logdir is not None, "Please provide a logdir"
+    
+    # 检测配置文件类型
+    config_json_path = osp.join(logdir, "config.json")
+    params_dir = osp.join(logdir, "params")
+    
+    if osp.exists(config_json_path):
+        # 处理JSON配置（现有逻辑）
+        print(f"Loading JSON configuration from: {config_json_path}")
+        return load_json_configuration(config_json_path)
+    elif osp.exists(params_dir):
+        # 处理YAML配置（新增逻辑）
+        print(f"Loading YAML configuration from: {params_dir}")
+        return load_yaml_configuration(params_dir)
+    else:
+        raise ValueError(f"No valid configuration files found in {logdir}. Expected either config.json or params/ directory with env.yaml and agent.yaml.")
 
 
 def load_base_model(logdir, device):
