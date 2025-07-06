@@ -1,6 +1,6 @@
 import rclpy
 from rclpy.node import Node
-from unitree_ros2_real import UnitreeRos2Real, get_euler_xyz
+from go2_ros2_node import Go2ROS2Node, get_euler_xyz
 
 import os
 import ast
@@ -170,7 +170,7 @@ def main(args):
     device = "cuda"
     duration = 0.02
 
-    env_node = UnitreeRos2Real(
+    env_node = Go2ROS2Node(
         "go2",
         cfg= config_dict,
         model_device= device,

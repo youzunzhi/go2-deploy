@@ -108,7 +108,7 @@ class RobotCfgs:
         turn_on_motor_mode = [0x01] * 12
         
 
-class UnitreeRos2Real(Node):
+class Go2ROS2Node(Node):
     """ A proxy implementation of the real H1 robot. """
     class WirelessButtons:
         R1 =            0b00000001 # 1

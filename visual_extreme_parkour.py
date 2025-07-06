@@ -3,7 +3,7 @@ from rclpy.node import Node
 
 from std_msgs.msg import Float32MultiArray
 from sensor_msgs.msg import Image, CameraInfo
-from unitree_ros2_real import UnitreeRos2Real
+from go2_ros2_node import Go2ROS2Node
 from rclpy.qos import qos_profile_sensor_data
 
 import os, sys
