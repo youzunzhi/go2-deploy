@@ -46,7 +46,7 @@ def resize2d(img, size):
     return (F.adaptive_avg_pool2d(Variable(img), size)).data
 
 
-class VisualHandlerNode(Node):
+class VisualNode(Node):
     """ A wapper class for the realsense camera """
     def __init__(self,
             cfg: dict,
@@ -210,7 +210,7 @@ def main(args):
     # duration = config_dict["sensor"]["forward_camera"]["refresh_duration"] # in sec
     duration = 0.01 # duration
 
-    visual_node = VisualHandlerNode(
+    visual_node = VisualNode(
         cfg= json.load(open(osp.join(args.logdir, "config.json"), "r")),
         cropping= [args.crop_top, args.crop_bottom, args.crop_left, args.crop_right],
         rs_resolution= (args.width, args.height),
