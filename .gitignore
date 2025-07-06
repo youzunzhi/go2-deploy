@@ -1,3 +1,6 @@
+# model files
+traced/*
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -179,6 +182,7 @@ cython_debug/
 #  and can be added to the global gitignore or merged into this file. However, if you prefer, 
 #  you could uncomment the following to ignore the enitre vscode folder
 # .vscode/
+*.code-workspace
 
 # Ruff stuff:
 .ruff_cache/

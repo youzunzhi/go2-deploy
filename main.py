@@ -58,20 +58,20 @@ def main_loop(node):
             node.use_sport_mode = False
             node._sport_state_change(0)
             node.use_stand_policy = True
-            node.use_parkour_policy = False
+            node.use_locomotion_policy = False
     
     if node.use_stand_policy:
         stand_action = node.get_stand_action()
         node.send_stand_action(stand_action)
     
     if (node.joy_stick_buffer.keys & node.WirelessButtons.Y):
-        node.get_logger().info("Y pressed, use the parkour policy")
+        node.get_logger().info("Y pressed, use the locomotion policy")
         node.use_stand_policy = False
-        node.use_parkour_policy = True
+        node.use_locomotion_policy = True
         node.use_sport_mode = False
         node.global_counter = 0
 
-    if node.use_parkour_policy:
+    if node.use_locomotion_policy:
         node.use_stand_policy = False
         node.use_sport_mode = False
         
@@ -120,9 +120,9 @@ def main_loop(node):
         node.global_counter += 1
 
     if (node.joy_stick_buffer.keys & node.WirelessButtons.L2):
-        node.get_logger().info("L2 pressed, stop using parkour policy, switch to sport mode.")
+        node.get_logger().info("L2 pressed, stop using locomotion policy, switch to sport mode.")
         node.use_stand_policy = False
-        node.use_parkour_policy = False
+        node.use_locomotion_policy = False
         node.use_sport_mode = True
         node.reset_obs()
         node._sport_state_change(1)
@@ -435,7 +435,7 @@ if __name__ == "__main__":
         choices=["manual_control", "ros_timer"],
         help="Select timing mode: manual_control (precise timing control) or ros_timer (ROS managed timer)",
     )
-    parser.add_argument("--mode", type= str, default= "parkour", choices=["parkour", "walk"])
+    parser.add_argument("--mode", type= str, default= "locomotion", choices=["locomotion", "walk"])
     args = parser.parse_args()
     
     main(args)

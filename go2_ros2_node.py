@@ -22,7 +22,7 @@ elif os.uname().machine == "aarch64":
         os.path.dirname(os.path.abspath(__file__)),
         "aarch64",
     ))
-from crc_module import get_crc
+from crc_module import get_crc  # type: ignore
 
 from multiprocessing import Process
 from collections import OrderedDict
@@ -148,7 +148,7 @@ class Go2ROS2Node(Node):
             dof_pos_protect_ratio= 1.1, # if the dof_pos is out of the range of this ratio, the process will shutdown.
             robot_class_name= "Go2",
             dryrun= True, # if True, the robot will not send commands to the real robot
-            mode= "parkour",
+            mode= "locomotion",
         ):
         super().__init__("unitree_ros2_real")
         self.NUM_DOF = getattr(RobotCfgs, robot_class_name).NUM_DOF
@@ -196,7 +196,7 @@ class Go2ROS2Node(Node):
         self.global_counter = 0
         self.visual_update_interval = 5
         self.use_stand_policy = False
-        self.use_parkour_policy = False
+        self.use_locomotion_policy = False
         self.use_sport_mode = True
 
     def init_stand_config(self):
@@ -555,10 +555,10 @@ class Go2ROS2Node(Node):
         commands = self._get_commands_obs()  # (1, 3)
         commands_time = time.monotonic()
 
-        if self.mode == "parkour":
-            parkour_walk = torch.tensor([[1, 0]], device= self.model_device, dtype= torch.float32) # parkour
+        if self.mode == "locomotion":
+            locomotion_walk = torch.tensor([[1, 0]], device= self.model_device, dtype= torch.float32) # locomotion
         elif self.mode == "walk":
-            parkour_walk = torch.tensor([[0, 1]], device= self.model_device, dtype= torch.float32) # walk
+            locomotion_walk = torch.tensor([[0, 1]], device= self.model_device, dtype= torch.float32) # walk
 
         dof_pos = self._get_dof_pos_obs()  # (1, 12)
         dof_pos_time = time.monotonic()
@@ -572,7 +572,7 @@ class Go2ROS2Node(Node):
         contact = self._get_contact_filt_obs()  # (1, 4)
         contact_time = time.monotonic()
         
-        proprio = torch.cat([ang_vel, imu, yaw_info, commands, parkour_walk,
+        proprio = torch.cat([ang_vel, imu, yaw_info, commands, locomotion_walk,
                         dof_pos, dof_vel,
                         last_actions, 
                         contact], dim=-1)

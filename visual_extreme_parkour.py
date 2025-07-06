@@ -35,7 +35,7 @@ elif os.uname().machine == "aarch64":
         os.path.dirname(os.path.abspath(__file__)),
         "aarch64",
     ))
-from crc_module import get_crc
+from crc_module import get_crc  # type: ignore
 
 import array
 
@@ -70,11 +70,6 @@ class VisualHandlerNode(Node):
         self.parse_args()
         self.start_pipeline()
         self.start_ros_handlers()
-
-        # debug
-        # depth_data_sim = np.load('/home/unitree/Desktop/extreme_parkour_onboard/depth_image_random.npy')
-        # depth_data_sim = np.load('/home/unitree/Desktop/extreme_parkour_onboard/depth_image_sim_336-11_flat.npy')
-        # self.depth_data_sim = torch.from_numpy(depth_data_sim.astype(np.float32)).unsqueeze(0).unsqueeze(0)
 
     def parse_args(self):
         # self.output_resolution = self.cfg["depth"]["resized"]
