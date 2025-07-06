@@ -283,7 +283,7 @@ if __name__ == "__main__":
     parser.add_argument("--nodryrun", action= "store_true", default= False, help= "Disable dryrun mode")
     parser.add_argument("--timing_mode", type=str, default="ros_timer",
         choices=["manual_control", "ros_timer"],
-        help="Select control mode: manual_control (precise timing control) or ros_timer (ROS managed timer)",
+        help="Select timing mode: manual_control (precise timing control) or ros_timer (ROS managed timer)",
     )
     parser.add_argument("--mode", type= str, default= "parkour", choices=["parkour", "walk"])
     args = parser.parse_args()
