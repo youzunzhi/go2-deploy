@@ -14,6 +14,7 @@ import torch
 import torch.nn.functional as F
 from torch.autograd import Variable
 from torch import nn
+import torch.jit
 
 from rsl_rl import modules
 from rsl_rl.modules import StateHistoryEncoder, RecurrentDepthBackbone, DepthOnlyFCBackbone58x87
@@ -156,84 +157,269 @@ def handle_timing_mode(env_node, timing_mode, duration):
         raise ValueError(f"Invalid timing mode: {timing_mode}")
 
 
-@torch.inference_mode()
-def main(args):
-    rclpy.init()
-
-    assert args.logdir is not None, "Please provide a logdir"
-    with open(osp.join(args.logdir, "config.json"), "r") as f:
-        config_dict = json.load(f, object_pairs_hook= OrderedDict)
+def load_configuration(logdir):
+    """
+    加载训练配置文件和设置控制参数
     
+    Args:
+        logdir: 包含配置文件的目录路径
+        
+    Returns:
+        config_dict: 加载的配置字典
+        duration: 控制周期时长
+    """
+    assert logdir is not None, "Please provide a logdir"
+    
+    # 加载训练配置文件
+    config_path = osp.join(logdir, "config.json")
+    with open(config_path, "r") as f:
+        config_dict = json.load(f, object_pairs_hook=OrderedDict)
+    
+    # 设置控制参数
     config_dict["control"]["computer_clip_torque"] = True
     
-    # duration = config_dict["sim"]["dt"] * config_dict["control"]["decimation"] # different from parkour
-    device = "cuda"
+    # 设置控制周期 (固定为20ms，与训练时不同)
     duration = 0.02
+    
+    return config_dict, duration
 
-    env_node = Go2ROS2Node(
-        "go2",
-        cfg= config_dict,
-        model_device= device,
-        dryrun= not args.nodryrun,
-        mode = args.mode,
-    )
 
-    env_node.get_logger().info("Model loaded from: {}".format(osp.join(args.logdir)))
-    env_node.get_logger().info("Control Duration: {} sec".format(duration))
-    env_node.get_logger().info("Motor Stiffness (kp): {}".format(env_node.p_gains))
-    env_node.get_logger().info("Motor Damping (kd): {}".format(env_node.d_gains))
-
+def load_base_model(logdir, device):
+    """
+    加载基础模型 (JIT格式)
+    
+    Args:
+        logdir: 模型文件目录
+        device: 计算设备 (cuda/cpu)
+        
+    Returns:
+        base_model: 加载的基础模型
+        estimator: 速度估计器
+        hist_encoder: 历史编码器
+        actor: 动作生成器
+    """
     base_model_name = 'base_jit.pt'
-    base_model_path = os.path.join(args.logdir, base_model_name)
-
-    vision_model_name = 'vision_weight.pt'
-    vision_model_path = os.path.join(args.logdir, vision_model_name)
-
+    base_model_path = os.path.join(logdir, base_model_name)
+    
+    # 加载JIT格式的基础模型
     base_model = torch.jit.load(base_model_path, map_location=device)
     base_model.eval()
-
+    
+    # 提取模型组件
     estimator = base_model.estimator.estimator
     hist_encoder = base_model.actor.history_encoder
     actor = base_model.actor.actor_backbone
+    
+    return base_model, estimator, hist_encoder, actor
 
+
+def load_vision_model(logdir, device):
+    """
+    加载视觉模型 (深度编码器)
+    
+    Args:
+        logdir: 模型文件目录
+        device: 计算设备
+        
+    Returns:
+        depth_encoder: 深度编码器模型
+    """
+    vision_model_name = 'vision_weight.pt'
+    vision_model_path = os.path.join(logdir, vision_model_name)
+    
+    # 加载视觉模型权重
     vision_model = torch.load(vision_model_path, map_location=device)
+    
+    # 创建深度编码器
     depth_backbone = DepthOnlyFCBackbone58x87(None, 32, 512)
     depth_encoder = RecurrentDepthBackbone(depth_backbone, None).to(device)
+    
+    # 加载预训练权重
     depth_encoder.load_state_dict(vision_model['depth_encoder_state_dict'])
     depth_encoder.to(device)
     depth_encoder.eval()
     
+    return depth_encoder
+
+
+def create_observation_processor(estimator, hist_encoder):
+    """
+    创建观测处理函数
+    
+    Args:
+        estimator: 速度估计器
+        hist_encoder: 历史编码器
+        
+    Returns:
+        turn_obs: 观测处理函数
+    """
     def turn_obs(proprio, depth_latent_yaw, proprio_history, n_proprio, n_depth_latent, n_hist_len):
+        """
+        将原始传感器数据转换为神经网络输入格式
+        
+        Args:
+            proprio: 本体感受数据
+            depth_latent_yaw: 深度特征和偏航角
+            proprio_history: 历史本体感受数据
+            n_proprio: 本体感受数据维度
+            n_depth_latent: 深度特征维度
+            n_hist_len: 历史长度
+            
+        Returns:
+            obs: 处理后的观测向量
+        """
+        # 分离深度特征和偏航角
         depth_latent = depth_latent_yaw[:, :-2]
         yaw = depth_latent_yaw[:, -2:] * 1.5
         print('yaw: ', yaw)
         
+        # 更新本体感受数据中的偏航角
         proprio[:, 6:8] = yaw
-
+        
+        # 估计线速度特征
         lin_vel_latent = estimator(proprio)
-
+        
+        # 处理历史本体感受数据
         activation = nn.ELU()
         priv_latent = hist_encoder(activation, proprio_history.view(-1, n_hist_len, n_proprio))
-
         
+        # 拼接所有特征
         obs = torch.cat([proprio, depth_latent, lin_vel_latent, priv_latent], dim=-1)
-
+        
         return obs
+    
+    return turn_obs
 
+
+def create_depth_encoder(depth_encoder):
+    """
+    创建深度编码函数
+    
+    Args:
+        depth_encoder: 深度编码器模型
+        
+    Returns:
+        encode_depth: 深度编码函数
+    """
     def encode_depth(depth_image, proprio):
+        """
+        将深度图像编码为特征向量
+        
+        Args:
+            depth_image: 深度图像
+            proprio: 本体感受数据
+            
+        Returns:
+            depth_latent_yaw: 深度特征和偏航角
+        """
         depth_latent_yaw = depth_encoder(depth_image, proprio)
+        
+        # 检查NaN值
         if torch.isnan(depth_latent_yaw).any():
             print('depth_latent_yaw contains nan and the depth image is: ', depth_image)
+        
         return depth_latent_yaw
     
+    return encode_depth
+
+
+def create_policy(actor):
+    """
+    创建策略函数
+    
+    Args:
+        actor: 动作生成器
+        
+    Returns:
+        actor_model: 策略函数
+    """
     def actor_model(obs):
+        """
+        根据观测生成动作
+        
+        Args:
+            obs: 观测向量
+            
+        Returns:
+            action: 动作向量
+        """
         action = actor(obs)
         return action
+    
+    return actor_model
 
+
+def log_system_info(env_node, logdir, duration):
+    """
+    打印系统配置信息
+    
+    Args:
+        env_node: ROS节点
+        logdir: 模型目录
+        duration: 控制周期
+    """
+    env_node.get_logger().info("Model loaded from: {}".format(osp.join(logdir)))
+    env_node.get_logger().info("Control Duration: {} sec".format(duration))
+    env_node.get_logger().info("Motor Stiffness (kp): {}".format(env_node.p_gains))
+    env_node.get_logger().info("Motor Damping (kd): {}".format(env_node.d_gains))
+
+
+def setup_models(logdir, device):
+    """
+    统一设置模型和推理函数
+    
+    Args:
+        logdir: 模型文件目录
+        device: 计算设备
+        
+    Returns:
+        turn_obs: 观测处理函数
+        encode_depth: 深度编码函数
+        actor_model: 策略函数
+    """
+    # 加载基础模型
+    base_model, estimator, hist_encoder, actor = load_base_model(logdir, device)
+    
+    # 加载视觉模型
+    depth_encoder = load_vision_model(logdir, device)
+    
+    # 创建推理函数
+    turn_obs = create_observation_processor(estimator, hist_encoder)
+    encode_depth = create_depth_encoder(depth_encoder)
+    actor_model = create_policy(actor)
+    
+    return turn_obs, encode_depth, actor_model
+
+
+@torch.inference_mode()
+def main(args):
+    rclpy.init()
+
+    # 1. 加载配置
+    config_dict, duration = load_configuration(args.logdir)
+    device = "cuda"
+
+    # 2. 创建ROS节点
+    env_node = Go2ROS2Node(
+        "go2",
+        cfg=config_dict,
+        model_device=device,
+        dryrun=not args.nodryrun,
+        mode=args.mode,
+    )
+
+    # 3. 打印配置信息
+    log_system_info(env_node, args.logdir, duration)
+
+    # 4. 加载模型并创建推理函数
+    turn_obs, encode_depth, actor_model = setup_models(args.logdir, device)
+
+    # 5. 注册模型到节点
     env_node.register_models(turn_obs=turn_obs, depth_encode=encode_depth, policy=actor_model)
     env_node.start_ros_handlers()
     env_node.warm_up()
 
+    # 6. 启动控制循环
     handle_timing_mode(env_node, args.timing_mode, duration)
 
     rclpy.shutdown()
