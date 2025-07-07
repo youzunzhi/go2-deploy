@@ -159,26 +159,26 @@ def handle_timing_mode(env_node, timing_mode, duration):
 
 def load_configuration(logdir):
     """
-    加载训练配置文件和设置控制参数
+    Load training configuration file and set control parameters
     
     Args:
-        logdir: 包含配置文件的目录路径
+        logdir: Directory path containing the configuration file
         
     Returns:
-        config_dict: 加载的配置字典
-        duration: 控制周期时长
+        config_dict: Loaded configuration dictionary
+        duration: Control cycle duration
     """
     assert logdir is not None, "Please provide a logdir"
     
-    # 加载训练配置文件
+    # Load training configuration file
     config_path = osp.join(logdir, "config.json")
     with open(config_path, "r") as f:
         config_dict = json.load(f, object_pairs_hook=OrderedDict)
     
-    # 设置控制参数
+    # Set control parameters
     config_dict["control"]["computer_clip_torque"] = True
     
-    # 设置控制周期 (固定为20ms，与训练时不同)
+    # Set control cycle (fixed at 20ms, different from training)
     duration = 0.02
     
     return config_dict, duration
@@ -186,26 +186,26 @@ def load_configuration(logdir):
 
 def load_base_model(logdir, device):
     """
-    加载基础模型 (JIT格式)
+    Load base model (JIT format)
     
     Args:
-        logdir: 模型文件目录
-        device: 计算设备 (cuda/cpu)
+        logdir: Model file directory
+        device: Computing device (cuda/cpu)
         
     Returns:
-        base_model: 加载的基础模型
-        estimator: 速度估计器
-        hist_encoder: 历史编码器
-        actor: 动作生成器
+        base_model: Loaded base model
+        estimator: Speed estimator
+        hist_encoder: History encoder
+        actor: Action generator
     """
     base_model_name = 'base_jit.pt'
     base_model_path = os.path.join(logdir, base_model_name)
     
-    # 加载JIT格式的基础模型
+    # Load base model in JIT format
     base_model = torch.jit.load(base_model_path, map_location=device)
     base_model.eval()
     
-    # 提取模型组件
+    # Extract model components
     estimator = base_model.estimator.estimator
     hist_encoder = base_model.actor.history_encoder
     actor = base_model.actor.actor_backbone
@@ -215,26 +215,26 @@ def load_base_model(logdir, device):
 
 def load_vision_model(logdir, device):
     """
-    加载视觉模型 (深度编码器)
+    Load vision model (depth encoder)
     
     Args:
-        logdir: 模型文件目录
-        device: 计算设备
+        logdir: Model file directory
+        device: Computing device
         
     Returns:
-        depth_encoder: 深度编码器模型
+        depth_encoder: Depth encoder model
     """
     vision_model_name = 'vision_weight.pt'
     vision_model_path = os.path.join(logdir, vision_model_name)
     
-    # 加载视觉模型权重
+    # Load vision model weights
     vision_model = torch.load(vision_model_path, map_location=device)
     
-    # 创建深度编码器
+    # Create depth encoder
     depth_backbone = DepthOnlyFCBackbone58x87(None, 32, 512)
     depth_encoder = RecurrentDepthBackbone(depth_backbone, None).to(device)
     
-    # 加载预训练权重
+    # Load pre-trained weights
     depth_encoder.load_state_dict(vision_model['depth_encoder_state_dict'])
     depth_encoder.to(device)
     depth_encoder.eval()
@@ -244,46 +244,46 @@ def load_vision_model(logdir, device):
 
 def create_observation_processor(estimator, hist_encoder):
     """
-    创建观测处理函数
+    Create observation processing function
     
     Args:
-        estimator: 速度估计器
-        hist_encoder: 历史编码器
+        estimator: Speed estimator
+        hist_encoder: History encoder
         
     Returns:
-        turn_obs: 观测处理函数
+        turn_obs: Observation processing function
     """
     def turn_obs(proprio, depth_latent_yaw, proprio_history, n_proprio, n_depth_latent, n_hist_len):
         """
-        将原始传感器数据转换为神经网络输入格式
+        Convert raw sensor data to neural network input format
         
         Args:
-            proprio: 本体感受数据
-            depth_latent_yaw: 深度特征和偏航角
-            proprio_history: 历史本体感受数据
-            n_proprio: 本体感受数据维度
-            n_depth_latent: 深度特征维度
-            n_hist_len: 历史长度
+            proprio: Proprioceptive data
+            depth_latent_yaw: Depth features and yaw angle
+            proprio_history: Historical proprioceptive data
+            n_proprio: Proprioceptive data dimension
+            n_depth_latent: Depth feature dimension
+            n_hist_len: History length
             
         Returns:
-            obs: 处理后的观测向量
+            obs: Processed observation vector
         """
-        # 分离深度特征和偏航角
+        # Separate depth features and yaw angle
         depth_latent = depth_latent_yaw[:, :-2]
         yaw = depth_latent_yaw[:, -2:] * 1.5
         print('yaw: ', yaw)
         
-        # 更新本体感受数据中的偏航角
+        # Update yaw angle in proprioceptive data
         proprio[:, 6:8] = yaw
         
-        # 估计线速度特征
+        # Estimate linear velocity features
         lin_vel_latent = estimator(proprio)
         
-        # 处理历史本体感受数据
+        # Process historical proprioceptive data
         activation = nn.ELU()
         priv_latent = hist_encoder(activation, proprio_history.view(-1, n_hist_len, n_proprio))
         
-        # 拼接所有特征
+        # Concatenate all features
         obs = torch.cat([proprio, depth_latent, lin_vel_latent, priv_latent], dim=-1)
         
         return obs
@@ -293,28 +293,28 @@ def create_observation_processor(estimator, hist_encoder):
 
 def create_depth_encoder(depth_encoder):
     """
-    创建深度编码函数
+    Create depth encoding function
     
     Args:
-        depth_encoder: 深度编码器模型
+        depth_encoder: Depth encoder model
         
     Returns:
-        encode_depth: 深度编码函数
+        encode_depth: Depth encoding function
     """
     def encode_depth(depth_image, proprio):
         """
-        将深度图像编码为特征向量
+        Encode depth image into feature vector
         
         Args:
-            depth_image: 深度图像
-            proprio: 本体感受数据
+            depth_image: Depth image
+            proprio: Proprioceptive data
             
         Returns:
-            depth_latent_yaw: 深度特征和偏航角
+            depth_latent_yaw: Depth features and yaw angle
         """
         depth_latent_yaw = depth_encoder(depth_image, proprio)
         
-        # 检查NaN值
+        # Check for NaN values
         if torch.isnan(depth_latent_yaw).any():
             print('depth_latent_yaw contains nan and the depth image is: ', depth_image)
         
@@ -325,23 +325,23 @@ def create_depth_encoder(depth_encoder):
 
 def create_policy(actor):
     """
-    创建策略函数
+    Create policy function
     
     Args:
-        actor: 动作生成器
+        actor: Action generator
         
     Returns:
-        actor_model: 策略函数
+        actor_model: Policy function
     """
     def actor_model(obs):
         """
-        根据观测生成动作
+        Generate action based on observation
         
         Args:
-            obs: 观测向量
+            obs: Observation vector
             
         Returns:
-            action: 动作向量
+            action: Action vector
         """
         action = actor(obs)
         return action
@@ -351,12 +351,12 @@ def create_policy(actor):
 
 def log_system_info(env_node, logdir, duration):
     """
-    打印系统配置信息
+    Print system configuration information
     
     Args:
-        env_node: ROS节点
-        logdir: 模型目录
-        duration: 控制周期
+        env_node: ROS node
+        logdir: Model directory
+        duration: Control cycle
     """
     env_node.get_logger().info("Model loaded from: {}".format(osp.join(logdir)))
     env_node.get_logger().info("Control Duration: {} sec".format(duration))
@@ -366,24 +366,24 @@ def log_system_info(env_node, logdir, duration):
 
 def setup_models(logdir, device):
     """
-    统一设置模型和推理函数
+    Unified setup of models and inference functions
     
     Args:
-        logdir: 模型文件目录
-        device: 计算设备
+        logdir: Model file directory
+        device: Computing device
         
     Returns:
-        turn_obs: 观测处理函数
-        encode_depth: 深度编码函数
-        actor_model: 策略函数
+        turn_obs: Observation processing function
+        encode_depth: Depth encoding function
+        actor_model: Policy function
     """
-    # 加载基础模型
+    # Load base model
     base_model, estimator, hist_encoder, actor = load_base_model(logdir, device)
     
-    # 加载视觉模型
+    # Load vision model
     depth_encoder = load_vision_model(logdir, device)
     
-    # 创建推理函数
+    # Create inference functions
     turn_obs = create_observation_processor(estimator, hist_encoder)
     encode_depth = create_depth_encoder(depth_encoder)
     actor_model = create_policy(actor)
@@ -395,11 +395,11 @@ def setup_models(logdir, device):
 def main(args):
     rclpy.init()
 
-    # 1. 加载配置
+    # 1. Load configuration
     config_dict, duration = load_configuration(args.logdir)
     device = "cuda"
 
-    # 2. 创建ROS节点
+    # 2. Create ROS node
     env_node = Go2ROS2Node(
         "go2",
         cfg=config_dict,
@@ -408,18 +408,18 @@ def main(args):
         mode=args.mode,
     )
 
-    # 3. 打印配置信息
+    # 3. Print configuration information
     log_system_info(env_node, args.logdir, duration)
 
-    # 4. 加载模型并创建推理函数
+    # 4. Load models and create inference functions
     turn_obs, encode_depth, actor_model = setup_models(args.logdir, device)
 
-    # 5. 注册模型到节点
+    # 5. Register models to node
     env_node.register_models(turn_obs=turn_obs, depth_encode=encode_depth, policy=actor_model)
     env_node.start_ros_handlers()
     env_node.warm_up()
 
-    # 6. 启动控制循环
+    # 6. Start control loop
     handle_timing_mode(env_node, args.timing_mode, duration)
 
     rclpy.shutdown()
