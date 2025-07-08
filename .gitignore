@@ -1,5 +1,6 @@
 # model files
 *.pt
+*.jit
 *.pth
 *.pkl
 *.ptl

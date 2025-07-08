@@ -17,8 +17,8 @@ This is a robotics deployment system for the Unitree Go2 quadruped robot, combin
 
 ### Control Flow
 
-1. Load configuration from `weight-and-cfg/EPO/config.json`
-2. Initialize ROS2 node and robot connections
+1. Initialize ROS2 node and robot connections
+2. Load policy-specific configurations and weights when switching to neural network modes
 3. Run 50Hz control loop (20ms intervals) with timing modes:
    - **ROS Timer**: Standard ROS2-managed timing
    - **Manual Control**: Precise timing for high-performance operation
@@ -37,13 +37,11 @@ The system uses multiple specialized networks:
 
 ## Configuration System
 
-The central configuration file `weight-and-cfg/EPO/config.json` controls:
-- Robot physics parameters and URDF properties
-- Control gains, action scaling, and motor parameters
-- Sensor configuration (depth camera, IMU, joint encoders)
-- Locomotion patterns and stability control
-- Terrain handling and difficulty levels
-- Training parameters for observation/action spaces
+The system uses policy-specific configuration files for RL model deployment:
+- **`weight-and-cfg/EPO/config.json`** - Configuration for EPO policy training and deployment in simulation
+- Contains RL-specific parameters like observation/action spaces, training hyperparameters, and simulation environment settings
+- Used specifically for EPO policy weight loading and deployment
+- Future expansion planned to support navila-loco configurations and weights for broader policy compatibility
 
 ## Development Commands
 
@@ -100,14 +98,13 @@ Use timing logs to optimize performance and identify bottlenecks.
 - **Emergency stop**: Controller-based safety shutdown
 - **Hardware abstraction**: Safe motor control with PID gains
 
-## Key Configuration Parameters
+## Policy Configuration
 
-When modifying robot behavior, focus on these config sections:
-- `control.action_scale`: Motor command scaling
-- `control.decimation`: Control loop decimation factor
-- `terrain`: Terrain difficulty and type settings
-- `domain_rand`: Randomization parameters for robustness
-- `rewards`: Reward function weights for different behaviors
+Configuration files are copied from simulation training projects and not modified in go2-deploy:
+- EPO policy configs are copied from EPO training projects to `weight-and-cfg/EPO/`
+- Future support planned for navila-loco configs copied to `weight-and-cfg/navila-loco/`
+- Config files contain training-specific parameters like action scaling, terrain settings, and reward weights
+- Robot behavior modifications should be made in the original training projects, not in the deployment system
 
 ## File Structure Notes
 
