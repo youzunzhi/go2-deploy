@@ -6,6 +6,7 @@ import os
 import ast
 import os.path as osp
 import json
+import yaml
 import time
 from collections import OrderedDict
 from copy import deepcopy
@@ -160,6 +161,7 @@ def handle_timing_mode(env_node, timing_mode, duration):
 def load_configuration(logdir):
     """
     Load only necessary configuration parameters for deployment
+    Supports both JSON (EPO) and YAML (legged-loco) configuration formats
     
     Args:
         logdir: Directory path containing the configuration file
@@ -170,41 +172,40 @@ def load_configuration(logdir):
     """
     assert logdir is not None, "Please provide a logdir"
     
-    # Load full training configuration file
-    config_path = osp.join(logdir, "config.json")
-    with open(config_path, "r") as f:
-        full_config = json.load(f, object_pairs_hook=OrderedDict)
+    # Try to load configuration file - support both JSON and YAML formats
+    if osp.exists(osp.join(logdir, "config.json")):
+        config_path = osp.join(logdir, "config.json")
+        with open(config_path, "r") as f:
+            full_config = json.load(f, object_pairs_hook=OrderedDict)
+    elif osp.exists(osp.join(logdir, "params", "config.yaml")):
+        config_path = osp.join(logdir, "params", "config.yaml")
+        with open(config_path, "r") as f:
+            full_config = yaml.safe_load(f)
+    else:
+        raise FileNotFoundError(f"Configuration file not found in {logdir}. ")
     
-    # Extract only the necessary parameters that are actually used
+    # Extract normalization parameters with fallbacks for missing clip_actions
+    normalization = full_config.get("normalization", {})
     config_dict = {
         "normalization": {
-            "clip_observations": full_config["normalization"]["clip_observations"],
-            "clip_actions": full_config["normalization"]["clip_actions"],
+            "clip_observations": normalization.get("clip_observations", 100.0),
+            "clip_actions": normalization.get("clip_actions", 100.0),  # Default fallback
             "obs_scales": {
-                "ang_vel": full_config["normalization"]["obs_scales"]["ang_vel"],
-                "dof_pos": full_config["normalization"]["obs_scales"]["dof_pos"],
-                "dof_vel": full_config["normalization"]["obs_scales"]["dof_vel"]
+                "ang_vel": normalization.get("obs_scales", {}).get("ang_vel", 0.25),
+                "dof_pos": normalization.get("obs_scales", {}).get("dof_pos", 1.0),
+                "dof_vel": normalization.get("obs_scales", {}).get("dof_vel", 0.05)
             }
         },
         "control": {
-            "control_type": full_config["control"]["control_type"],
-            "stiffness": full_config["control"]["stiffness"],
-            "damping": full_config["control"]["damping"],
-            "action_scale": full_config["control"]["action_scale"],
+            "control_type": full_config.get("control", {}).get("control_type", "P"),
+            "stiffness": full_config.get("control", {}).get("stiffness", {}),
+            "damping": full_config.get("control", {}).get("damping", {}),
+            "action_scale": full_config.get("control", {}).get("action_scale", 0.25),
         },
         "init_state": {
-            "default_joint_angles": full_config["init_state"]["default_joint_angles"]
+            "default_joint_angles": full_config.get("init_state", {}).get("default_joint_angles", {})
         }
     }
-    
-    # Handle optional clip_actions_method parameter
-    if "clip_actions_method" in full_config["normalization"]:
-        config_dict["normalization"]["clip_actions_method"] = full_config["normalization"]["clip_actions_method"]
-        
-        # Add clip_actions_high and clip_actions_low if hard clipping is used
-        if full_config["normalization"].get("clip_actions_method") == "hard":
-            config_dict["normalization"]["clip_actions_high"] = full_config["normalization"]["clip_actions_high"]
-            config_dict["normalization"]["clip_actions_low"] = full_config["normalization"]["clip_actions_low"]
     
     # Set control cycle (fixed at 20ms, different from training)
     duration = 0.02

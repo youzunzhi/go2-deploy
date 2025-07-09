@@ -277,15 +277,6 @@ class Go2ROS2Node(Node):
         self.action_scale = self.cfg["control"]["action_scale"]
         self.get_logger().info("[Env] action scale: {:.2f}".format(self.action_scale))
         self.clip_actions = self.cfg["normalization"]["clip_actions"]
-        if self.cfg["normalization"].get("clip_actions_method", None) == "hard":
-            self.get_logger().info("clip_actions_method with hard mode")
-            self.get_logger().info("clip_actions_high: " + str(self.cfg["normalization"]["clip_actions_high"]))
-            self.get_logger().info("clip_actions_low: " + str(self.cfg["normalization"]["clip_actions_low"]))
-            self.clip_actions_method = "hard"
-            self.clip_actions_low = torch.tensor(self.cfg["normalization"]["clip_actions_low"], device= self.model_device, dtype= torch.float32)
-            self.clip_actions_high = torch.tensor(self.cfg["normalization"]["clip_actions_high"], device= self.model_device, dtype= torch.float32)
-        else:
-            self.get_logger().info("clip_actions_method is " + str(self.cfg["normalization"].get("clip_actions_method", None)))
         
         self.actions = torch.zeros(self.NUM_ACTIONS, device= self.model_device, dtype= torch.float32)    
 
@@ -612,9 +603,15 @@ class Go2ROS2Node(Node):
         
         self.actions = actions
 
-        hard_clip = self.cfg["normalization"]["clip_actions"]/self.cfg["control"]["action_scale"]
-        clipped_scaled_action = torch.clip(actions, -hard_clip, hard_clip) * self.cfg["control"]["action_scale"]
-        
+        # Check if clip_actions exists in config
+        if "clip_actions" in self.cfg.get("normalization", {}):
+            # EPO clipping
+            hard_clip = self.cfg["normalization"]["clip_actions"]/self.cfg["control"]["action_scale"]
+            clipped_scaled_action = torch.clip(actions, -hard_clip, hard_clip) * self.cfg["control"]["action_scale"]
+        else:
+            # legged-loco (no clipping)
+            clipped_scaled_action = actions * self.cfg["control"]["action_scale"]
+
         robot_coordinates_action = clipped_scaled_action + self.default_dof_pos.unsqueeze(0)
         self._publish_legs_cmd(robot_coordinates_action[0], stand=False)
 

@@ -180,3 +180,7 @@ Use timing logs to optimize performance and identify bottlenecks.
 - Policy loading abstraction for different training environments
 - Configuration format translation and validation
 - Observation structure handling for different policy types
+
+### Configuration Management
+- **Do not modify configuration files**: 
+  - Don't try to create or modify configuration files in weight-and-cfg/, as they are copied from simulation training and I want to keep them as they were.
