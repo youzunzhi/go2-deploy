@@ -57,56 +57,52 @@ def get_euler_xyz(q):
 
     return roll, pitch, yaw
 
-class RobotCfgs:
-    class H1:
-        pass
-
-    class Go2:
-        NUM_DOF = 12
-        NUM_ACTIONS = 12
-        # The order of joints has been reindexed in simulation.
-        # So we do not need here.
-        dof_map = [
-            0, 1, 2,
-            3, 4, 5,
-            6, 7, 8,
-            9, 10, 11,
-        ]
-        dof_names = [
-            "FR_hip_joint",
-            "FR_thigh_joint",
-            "FR_calf_joint",
-            "FL_hip_joint",
-            "FL_thigh_joint",
-            "FL_calf_joint",
-            "RR_hip_joint",
-            "RR_thigh_joint",
-            "RR_calf_joint",
-            "RL_hip_joint",
-            "RL_thigh_joint",
-            "RL_calf_joint",
-        ]
-        dof_signs = [1.] * 12
-        joint_limits_high = torch.tensor([
-            1.0472, 3.4907, -0.83776,
-            1.0472, 3.4907, -0.83776,
-            1.0472, 4.5379, -0.83776,
-            1.0472, 4.5379, -0.83776,
-        ], device= "cpu", dtype= torch.float32)
-        joint_limits_low = torch.tensor([
-            -1.0472, -1.5708, -2.7227,
-            -1.0472, -1.5708, -2.7227,
-            -1.0472, -0.5236, -2.7227,
-            -1.0472, -0.5236, -2.7227,
-        ], device= "cpu", dtype= torch.float32)
-        torque_limits = torch.tensor([ # from urdf and in simulation order
-            25, 40, 40,
-            25, 40, 40,
-            25, 40, 40,
-            25, 40, 40,
-        ], device= "cpu", dtype= torch.float32)
-        turn_on_motor_mode = [0x01] * 12
-        
+class Go2RobotCfgs:
+    NUM_DOF = 12
+    NUM_ACTIONS = 12
+    # The order of joints has been reindexed in simulation.
+    # So we do not need here.
+    dof_map = [
+        0, 1, 2,
+        3, 4, 5,
+        6, 7, 8,
+        9, 10, 11,
+    ]
+    dof_names = [
+        "FR_hip_joint",
+        "FR_thigh_joint",
+        "FR_calf_joint",
+        "FL_hip_joint",
+        "FL_thigh_joint",
+        "FL_calf_joint",
+        "RR_hip_joint",
+        "RR_thigh_joint",
+        "RR_calf_joint",
+        "RL_hip_joint",
+        "RL_thigh_joint",
+        "RL_calf_joint",
+    ]
+    dof_signs = [1.] * 12
+    joint_limits_high = torch.tensor([
+        1.0472, 3.4907, -0.83776,
+        1.0472, 3.4907, -0.83776,
+        1.0472, 4.5379, -0.83776,
+        1.0472, 4.5379, -0.83776,
+    ], device= "cpu", dtype= torch.float32)
+    joint_limits_low = torch.tensor([
+        -1.0472, -1.5708, -2.7227,
+        -1.0472, -1.5708, -2.7227,
+        -1.0472, -0.5236, -2.7227,
+        -1.0472, -0.5236, -2.7227,
+    ], device= "cpu", dtype= torch.float32)
+    torque_limits = torch.tensor([ # from urdf and in simulation order
+        25, 40, 40,
+        25, 40, 40,
+        25, 40, 40,
+        25, 40, 40,
+    ], device= "cpu", dtype= torch.float32)
+    turn_on_motor_mode = [0x01] * 12
+    
 
 class Go2ROS2Node(Node):
     """ A proxy implementation of the real H1 robot. """
@@ -593,6 +589,61 @@ class Go2ROS2Node(Node):
         return proprio
 
 
+    def clip_actions_by_joint_limits(self, robot_coordinates_action):
+        """
+        Clip actions to ensure joint positions stay within safe limits
+        
+        Args:
+            robot_coordinates_action: Actions in robot coordinate system (batch_size, NUM_DOF)
+            
+        Returns:
+            clipped_action: Actions clipped to joint limits
+        """
+        # Get joint limits from robot configuration
+        joint_limits_high = getattr(RobotCfgs, self.robot_class_name).joint_limits_high.to(self.model_device)
+        joint_limits_low = getattr(RobotCfgs, self.robot_class_name).joint_limits_low.to(self.model_device)
+        
+        # Clip actions to joint limits
+        clipped_action = torch.clamp(robot_coordinates_action, 
+                                   joint_limits_low.unsqueeze(0), 
+                                   joint_limits_high.unsqueeze(0))
+        
+        return clipped_action
+    
+    def clip_actions_by_torque_limits(self, robot_coordinates_action, current_joint_pos, current_joint_vel):
+        """
+        Clip actions to ensure torque output stays within safe limits
+        
+        Args:
+            robot_coordinates_action: Target positions in robot coordinate system (batch_size, NUM_DOF)
+            current_joint_pos: Current joint positions (batch_size, NUM_DOF)
+            current_joint_vel: Current joint velocities (batch_size, NUM_DOF)
+            
+        Returns:
+            clipped_action: Actions clipped to torque limits
+        """
+        # Get torque limits from robot configuration
+        torque_limits = getattr(RobotCfgs, self.robot_class_name).torque_limits.to(self.model_device)
+        
+        # Convert torque limits to position limits using PD control formula
+        # tau = kp * (target - current) - kd * vel
+        # For |tau| <= torque_limit:
+        # target_min = current + (-torque_limit + kd * vel) / kp
+        # target_max = current + (torque_limit + kd * vel) / kp
+        
+        kp = self.p_gains.unsqueeze(0)  # (1, NUM_DOF)
+        kd = self.d_gains.unsqueeze(0)  # (1, NUM_DOF)
+        torque_limit = torque_limits.unsqueeze(0)  # (1, NUM_DOF)
+        
+        # Calculate position limits based on torque constraints
+        target_min = current_joint_pos + (-torque_limit + kd * current_joint_vel) / kp
+        target_max = current_joint_pos + (torque_limit + kd * current_joint_vel) / kp
+        
+        # Clip robot coordinates action to these limits
+        clipped_action = torch.clamp(robot_coordinates_action, target_min, target_max)
+        
+        return clipped_action
+
     def send_action(self, actions):
         """ Send the action to the robot motors, which does the preprocessing
         just like env.step in simulation.
@@ -613,6 +664,15 @@ class Go2ROS2Node(Node):
             clipped_scaled_action = actions * self.cfg["control"]["action_scale"]
 
         robot_coordinates_action = clipped_scaled_action + self.default_dof_pos.unsqueeze(0)
+        
+        # Apply safety clipping using joint limits
+        robot_coordinates_action = self.clip_actions_by_joint_limits(robot_coordinates_action)
+        
+        # Apply safety clipping using torque limits
+        current_joint_pos = self.dof_pos_
+        current_joint_vel = self.dof_vel_
+        robot_coordinates_action = self.clip_actions_by_torque_limits(robot_coordinates_action, current_joint_pos, current_joint_vel)
+        
         self._publish_legs_cmd(robot_coordinates_action[0], stand=False)
 
     def send_stand_action(self, actions):
