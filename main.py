@@ -191,7 +191,6 @@ def load_configuration(logdir):
             "stiffness": full_config["control"]["stiffness"],
             "damping": full_config["control"]["damping"],
             "action_scale": full_config["control"]["action_scale"],
-            "computer_clip_torque": True  # Set deployment-specific parameter
         },
         "init_state": {
             "default_joint_angles": full_config["init_state"]["default_joint_angles"]
