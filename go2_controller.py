@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import torch  # Pre-import to resolve TLS issue
 """
 Go2 Velocity Command Controller
 Receives velocity commands from NaVILA server and prints them for locomotion policy
@@ -22,38 +23,51 @@ from sensor_msgs.msg import Image
 from std_msgs.msg import String
 from cv_bridge import CvBridge
 import pyrealsense2 as rs
+from unitree_ros2_real import UnitreeRos2Real
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-class Go2VelocityController(Node):
+class Go2VelocityController(UnitreeRos2Real):
     """
     ROS2 node that receives velocity commands from NaVILA server
-    Prints velocity commands for integration with locomotion policy
+    and controls the robot using the Unitree Sport API.
     """
     
-    def __init__(self, server_ip: str, server_port: int, instruction: str):
-        super().__init__('go2_velocity_controller')
+    def __init__(self, server_ip: str, server_port: int, instruction: str, dryrun: bool = True):
+        # Initialize the parent class (UnitreeRos2Real)
+        super().__init__(
+            node_name='go2_velocity_controller',
+            dryrun=dryrun
+        )
         
+        self._setup_ros_interfaces()
+
         # Server configuration
         self.server_url = f"http://{server_ip}:{server_port}"
         self.instruction = instruction
         
         # Image logging setup
-        self.image_log_dir = "captured_images"
+        self.image_log_dir = "/home/unitree/go2-deploy/captured_images"
+        self.output_image_path = os.path.join(self.image_log_dir, "output_img.jpg")
         os.makedirs(self.image_log_dir, exist_ok=True)
-        logger.info(f"📷 Saving captured images to '{self.image_log_dir}/'")
+        # logger.info(f"📷 Saving captured images to '{self.output_image_path}'")
 
-        # ROS2 and Camera setup
+        # Camera and processing setup
         self.bridge = CvBridge()
-        self._setup_ros_interfaces()
         self._setup_camera()
         
         # Robot state
         self.is_processing = False
         self.processing_lock = Lock()
+        self.use_sport_mode = True  # Start in sport mode for safety
+        self.use_vlm_mode = False
+        
+        # VLM command execution state
+        self.vlm_state = "IDLE"  # "IDLE" or "EXECUTING"
+        self.vlm_command_end_time = 0.0
         
         # Velocity command tracking
         self.current_velocity = {"linear_x": 0.0, "angular_z": 0.0, "duration": 0.0}
@@ -71,13 +85,15 @@ class Go2VelocityController(Node):
         # Initialize connection to server
         self._initialize_server_connection()
         
-        # Create control timer - runs at 1Hz for VLM inference (VLM is slower than locomotion)
-        self.control_timer = self.create_timer(1.0, self.control_loop)
+        # The main loop is now driven by a timer for periodic execution
+        self.control_timer = self.create_timer(0.1, self.main_loop) # Run at 10Hz
         
         logger.info(f"🤖 Go2 Velocity Controller initialized")
         logger.info(f"📡 Server: {self.server_url}")
         logger.info(f"🎯 Instruction: '{self.instruction}'")
-    
+        logger.info("Press 'A' on the joystick to enter VLM mode.")
+        logger.info("Press 'L2' on the joystick to exit VLM mode and return to sport mode.")
+
     def _setup_camera(self):
         """Initialize the RealSense camera using the verified stable method."""
         logger.info("📷 Initializing RealSense camera...")
@@ -86,7 +102,8 @@ class Go2VelocityController(Node):
             self.rs_config = rs.config()
 
             # Configure and enable only the color stream, which was proven to be stable.
-            width, height, fps = 640, 480, 30
+            # Using 1280x720 for a wider field of view and better quality.
+            width, height, fps = 1280, 720, 30
             logger.info(f"Configuring stream: Color {width}x{height} @ {fps}fps...")
             self.rs_config.enable_stream(rs.stream.color, width, height, rs.format.bgr8, fps)
             
@@ -104,24 +121,20 @@ class Go2VelocityController(Node):
             raise RuntimeError(f"Could not initialize RealSense camera: {e}")
     
     def _setup_ros_interfaces(self):
-        """Setup ROS2 publishers"""
-        
+        """Setup ROS2 publishers for monitoring and debugging."""
         qos_profile = QoSProfile(
             reliability=ReliabilityPolicy.RELIABLE,
             history=HistoryPolicy.KEEP_LAST,
             depth=1
         )
         
-        # Publishers
         self.velocity_cmd_pub = self.create_publisher(
             String, '/navila/velocity_command', qos_profile
         )
         self.status_pub = self.create_publisher(
             String, '/navila/status', qos_profile
         )
-        
-        # Image subscribers are no longer needed, camera is accessed directly
-        logger.info("📡 ROS2 publishers initialized")
+        logger.info("📡 ROS2 publishers for monitoring are initialized.")
     
     def _get_image_from_camera(self) -> Optional[np.ndarray]:
         """Gets a color image frame from the RealSense camera."""
@@ -212,7 +225,7 @@ class Go2VelocityController(Node):
                 result = response.json()
                 if result.get('success', False):
                     self.stats['successful_inferences'] += 1
-                    logger.info(f"✅ Velocity command received in {inference_time:.2f}s")
+                    # logger.info(f"✅ Velocity command received in {inference_time:.2f}s")
                     return result
                 else:
                     logger.error(f"❌ Server error: {result.get('message', 'Unknown error')}")
@@ -229,125 +242,139 @@ class Go2VelocityController(Node):
         self.stats['failed_inferences'] += 1
         return None
     
-    def _process_velocity_command(self, velocity_result: Dict[str, Any]):
-        """Process and print velocity command for locomotion policy integration"""
+    def _process_and_execute_command(self, velocity_result: Dict[str, Any]):
+        """Process velocity command and control the robot via Sport API."""
         
-        # Extract velocity command
+        # Print the raw VLM output as requested
+        if velocity_result:
+            logger.info(f"VLM action: {velocity_result.get('action_type', '')}")
+
+        
         linear_x = velocity_result.get('linear_x', 0.0)
         angular_z = velocity_result.get('angular_z', 0.0)
-        duration = velocity_result.get('duration', 0.8)
+        duration = velocity_result.get('duration', 0.8) # Duration is informational now
         action_type = velocity_result.get('action_type', 'unknown')
         
-        # Update current velocity state
         self.current_velocity = {
-            "linear_x": linear_x,
-            "angular_z": angular_z,
-            "duration": duration
+            "linear_x": linear_x, "angular_z": angular_z, "duration": duration
         }
         self.last_velocity_time = time.time()
         
-        # Print velocity command for debugging and integration
-        print("=" * 60)
-        print(f"🎯 VELOCITY COMMAND FROM NAVILA VLM:")
-        print(f"   Linear X:  {linear_x:.4f} m/s")
-        print(f"   Angular Z: {angular_z:.4f} rad/s")
-        print(f"   Duration:  {duration:.2f} seconds")
-        print(f"   Action:    {action_type}")
-        print(f"   From Queue: {velocity_result.get('from_queue', False)}")
-        print(f"   Queue Remaining: {velocity_result.get('queue_remaining', 0)}")
-        print(f"   Episode Step: {velocity_result.get('episode_step', 0)}")
-        print(f"   Inference Time: {velocity_result.get('inference_time', 0):.3f}s")
-        if 'raw_output' in velocity_result:
-            print(f"   VLM Output: '{velocity_result['raw_output']}'")
-        print("=" * 60)
+        # logger.info(
+        #     f"✅ VLM command received: action='{action_type}', "
+        #     f"vx={linear_x:.2f} m/s, vyaw={angular_z:.2f} rad/s"
+        # )
         
-        # Publish velocity command as ROS message for other nodes
-        velocity_msg = String()
-        velocity_msg.data = json.dumps({
-            'linear_x': linear_x,
-            'angular_z': angular_z,
-            'duration': duration,
-            'action_type': action_type,
-            'timestamp': time.time(),
-            **velocity_result
-        })
-        self.velocity_cmd_pub.publish(velocity_msg)
-        
-        # Update statistics
-        self.stats['total_commands'] += 1
-        
-        # Publish status update
-        status_msg = String()
-        status_msg.data = json.dumps({
-            'velocity_command': self.current_velocity,
-            'action_type': action_type,
-            'timestamp': time.time(),
-            'stats': self.stats
-        })
-        self.status_pub.publish(status_msg)
-        
-        logger.info(f"📤 Velocity command published: linear_x={linear_x:.3f}, angular_z={angular_z:.3f}")
-    
-    def control_loop(self):
-        """Main control loop - called by ROS timer"""
-        
-        # Skip if already processing
-        if not self.processing_lock.acquire(blocking=False):
-            logger.debug("🔄 Skipping cycle - already processing")
-            return
-        
-        try:
-            self.is_processing = True
-            
-            # Get image directly from the camera
-            logger.debug("📷 Acquiring image from RealSense camera...")
-            cv_image = self._get_image_from_camera()
+        # Execute move command directly
+        self.move(vx=linear_x, vy=0.0, vyaw=angular_z)
 
-            if cv_image is None:
-                logger.warning("⚠️ Failed to acquire image, skipping control cycle.")
-                # The lock will be released in the 'finally' block.
-                # No need to release it here, which caused the crash.
-                return
-            
-            # Save the captured image to a file
-            timestamp = time.strftime("%Y%m%d_%H%M%S")
-            milliseconds = int((time.time() - int(time.time())) * 1000)
-            image_filename = f"img_{timestamp}_{milliseconds:03d}.jpg"
-            image_path = os.path.join(self.image_log_dir, image_filename)
-            try:
-                cv2.imwrite(image_path, cv_image)
-                logger.debug(f"💾 Image saved to {image_path}")
-            except Exception as e:
-                logger.error(f"❌ Failed to save image to {image_path}: {e}")
-            
-            # Send image to VLM server and get velocity command
-            logger.debug("📤 Sending image to VLM server...")
-            velocity_result = self._send_image_to_server(cv_image)
-            
-            if velocity_result:
-                self._process_velocity_command(velocity_result)
-            else:
-                logger.warning("⚠️ No valid velocity command received")
-                # Print stop command as fallback
-                print("=" * 60)
-                print("🛑 FALLBACK VELOCITY COMMAND (STOP):")
-                print("   Linear X:  0.0000 m/s")
-                print("   Angular Z: 0.0000 rad/s")
-                print("   Duration:  0.8 seconds")
-                print("   Action:    fallback_stop")
-                print("=" * 60)
+        # Publish for monitoring
+        self.stats['total_commands'] += 1
+        status_msg = String(data=json.dumps(self.get_status_summary()))
+        self.status_pub.publish(status_msg)
+        self.velocity_cmd_pub.publish(String(data=json.dumps(self.current_velocity)))
+
+    def main_loop(self):
+        """
+        Main control loop, implements a state machine based on joystick input.
+        """
+        # Check joystick buffer safely. If it's the initial empty dict, or not yet populated, do nothing.
+        if not self.joy_stick_buffer or isinstance(self.joy_stick_buffer, dict):
+            return
+
+        keys = self.joy_stick_buffer.keys
+        
+        # L2 is the universal "exit to sport mode" button
+        if keys & self.WirelessButtons.L2:
+            if self.use_vlm_mode:
+                logger.info("L2 pressed. Exiting VLM mode, returning to safety standby.")
+                self.use_vlm_mode = False
+                self.use_sport_mode = True
+                self.balance_stand() # Go to a safe, stable state
+            return
+
+        # --- Sport Mode ---
+        if self.use_sport_mode:
+            # Handle standard sport mode commands if needed (e.g., stand up/down)
+            if keys & self.WirelessButtons.R1:
+                logger.info("R1 pressed in Sport Mode: Standing up.")
+                self.stand()
+            if keys & self.WirelessButtons.R2:
+                logger.info("R2 pressed in Sport Mode: Sitting down.")
+                self.sit_down()
+
+            # 'A' button to enter VLM mode
+            if keys & self.WirelessButtons.A:
+                logger.info("'A' pressed. Staring VLM mode activation sequence...")
+                self.use_sport_mode = False
+                self.use_vlm_mode = True
                 
-        except Exception as e:
-            logger.error(f"💥 Control loop error: {e}")
-            
-        finally:
-            self.is_processing = False
-            # This ensures the lock is always released, but only once.
-            if self.processing_lock.locked():
-                self.processing_lock.release()
-    
+                # --- Activation Sequence ---
+                # 1. Command the robot to stand up.
+                logger.info("Activation Step 1: Commanding robot to stand up...")
+                self.stand()
+                time.sleep(2.0) # Give it time to complete the stand action
+                
+                # 2. Command the robot to enter balance standby mode. This "unlocks" it for movement.
+                logger.info("Activation Step 2: Commanding robot to enter balance standby...")
+                self.balance_stand()
+                time.sleep(1.0) # Settle into balance stand
+                
+                logger.info("✅ Robot is now in VLM mode and ready to receive move commands.")
+            return
+
+        # --- VLM Mode ---
+        if self.use_vlm_mode:
+            now = time.time()
+
+            # State 1: Command is actively being executed.
+            if self.vlm_state == "EXECUTING":
+                if now < self.vlm_command_end_time:
+                    # Robot continues with the last sent velocity. Do nothing.
+                    return
+                else:
+                    # Duration is over. Stop the robot and switch to IDLE to get the next command.
+                    self.move(vx=0.0, vy=0.0, vyaw=0.0)
+                    self.vlm_state = "IDLE"
+
+            # State 2: Robot is idle, ready for a new command.
+            if self.vlm_state == "IDLE":
+                # --- This block replaces the previous continuous request logic ---
+                if self.is_processing:
+                    return
+
+                with self.processing_lock:
+                    self.is_processing = True
+
+                try:
+                    # logger.info("Requesting new command from VLM server...") # Canceled as per request
+                    cv_image = self._get_image_from_camera()
+                    if cv_image is not None:
+                        # Save the captured image to the specified file
+                        try:
+                            cv2.imwrite(self.output_image_path, cv_image)
+                        except Exception as e:
+                            logger.error(f"❌ Failed to save image to {self.output_image_path}: {e}")
+
+                        velocity_result = self._send_image_to_server(cv_image)
+                        if velocity_result:
+                            # Command received, process and execute it
+                            self._process_and_execute_command(velocity_result)
+                            
+                            # Set the execution timer and switch state
+                            duration = velocity_result.get('duration', 0.8)
+                            self.vlm_command_end_time = time.time() + duration
+                            self.vlm_state = "EXECUTING"
+                            # logger.info(f"Command execution started. Duration: {duration:.2f}s.") # This can be noisy
+                        else:
+                            # If VLM fails, do nothing and wait for the next cycle to retry
+                            logger.warning("VLM inference failed. Will retry on next cycle.")
+                finally:
+                    with self.processing_lock:
+                        self.is_processing = False
+
     def get_status_summary(self) -> Dict[str, Any]:
-        """Get comprehensive status summary"""
+        """Gets a summary of the current node status for logging."""
         current_time = time.time()
         
         last_image_time = self.stats.get('last_image_time', 0)
@@ -366,64 +393,36 @@ class Go2VelocityController(Node):
         }
     
     def shutdown(self):
-        """Graceful shutdown"""
-        logger.info("🛑 Shutting down velocity controller...")
-
-        # Stop the camera pipeline
-        if hasattr(self, 'rs_pipeline'):
-            logger.info("📷 Stopping RealSense pipeline...")
-            self.rs_pipeline.stop()
-        
-        # Send final stop command
-        print("=" * 60)
-        print("🛑 SHUTDOWN VELOCITY COMMAND:")
-        print("   Linear X:  0.0000 m/s")
-        print("   Angular Z: 0.0000 rad/s")
-        print("   Duration:  0.0 seconds")
-        print("   Action:    shutdown_stop")
-        print("=" * 60)
-        
-        # Cancel timer
-        if hasattr(self, 'control_timer'):
-            self.control_timer.cancel()
-        
-        logger.info("✅ Shutdown complete")
-
+        """Gracefully shutdown the node and camera."""
+        logger.info("Shutting down Go2 Velocity Controller...")
+        self.rs_pipeline.stop()
+        logger.info("✅ RealSense camera stopped.")
+        self.destroy_node()
 
 def main(args=None):
-    """Main entry point"""
     rclpy.init(args=args)
+    # --- Configuration ---
+    SERVER_IP = os.environ.get("NAVILA_SERVER_IP", "10.165.232.223")
+    SERVER_PORT = int(os.environ.get("NAVILA_SERVER_PORT", 8888))
+    INSTRUCTION = "Move forward.Turn left at the navy armchair."
+    DRYRUN = False # Set to False to send commands to the real robot
     
-    # Configuration - update these for your setup
-    SERVER_IP = "10.165.232.223"  # VLM server internal IP
-    SERVER_PORT = 8888
-    INSTRUCTION = "Navigate to the door and stop in front of it"
-    
-    controller = None
-    
+    controller_node = None
     try:
-        logger.info("🚀 Starting Go2 Velocity Controller...")
-        
-        controller = Go2VelocityController(
-            server_ip=SERVER_IP,
+        controller_node = Go2VelocityController(
+            server_ip=SERVER_IP, 
             server_port=SERVER_PORT, 
-            instruction=INSTRUCTION
+            instruction=INSTRUCTION,
+            dryrun=DRYRUN
         )
-        
-        logger.info("✅ Controller ready - starting velocity command processing")
-        rclpy.spin(controller)
-        
-    except KeyboardInterrupt:
-        logger.info("⌨️ Keyboard interrupt received")
-    except Exception as e:
-        logger.error(f"❌ Fatal error: {e}")
+        rclpy.spin(controller_node)
+    except (RuntimeError, KeyboardInterrupt) as e:
+        logger.info(f"Node shutdown requested: {e}")
     finally:
-        if controller:
-            controller.shutdown()
-        
-        logger.info("🏁 Shutting down ROS2...")
-        rclpy.shutdown()
-
+        if controller_node:
+            controller_node.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 if __name__ == '__main__':
     main()

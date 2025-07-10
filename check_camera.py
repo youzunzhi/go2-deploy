@@ -47,7 +47,7 @@ def check_pipeline_start():
         config = rs.config()
         
         # Request a specific stream configuration
-        width, height, fps = 640, 480, 30
+        width, height, fps = 1280, 720, 30
         print(f"   Configuring stream: Color {width}x{height} @ {fps}fps...")
         config.enable_stream(rs.stream.color, width, height, rs.format.bgr8, fps)
         
