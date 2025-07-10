@@ -480,18 +480,164 @@ def setup_models(logdir, device):
         encode_depth: Depth encoding function
         actor_model: Policy function
     """
-    # Load base model
-    base_model, estimator, hist_encoder, actor = load_base_model(logdir, device)
+    # Determine policy source from logdir structure
+    policy_source = determine_policy_source(logdir)
     
-    # Load vision model
-    depth_encoder = load_vision_model(logdir, device)
-    
-    # Create inference functions
-    turn_obs = create_observation_processor(estimator, hist_encoder)
-    encode_depth = create_depth_encoder(depth_encoder)
-    actor_model = create_policy(actor)
+    if policy_source == "EPO":
+        # EPO: Load separate base model and vision model
+        base_model, estimator, hist_encoder, actor = load_base_model(logdir, device)
+        depth_encoder = load_vision_model(logdir, device)
+        
+        # Create inference functions for EPO
+        turn_obs = create_observation_processor(estimator, hist_encoder)
+        encode_depth = create_depth_encoder(depth_encoder)
+        actor_model = create_policy(actor)
+        
+    elif policy_source == "legged-loco":
+        # legged-loco: Load single JIT policy
+        policy = load_legged_loco_policy(logdir, device)
+        
+        # Create inference functions for legged-loco
+        turn_obs = create_legged_loco_observation_processor()
+        encode_depth = create_dummy_depth_encoder()  # No vision in base policy
+        actor_model = create_legged_loco_policy_function(policy)
+        
+    else:
+        raise ValueError(f"Unsupported policy source: {policy_source}")
     
     return turn_obs, encode_depth, actor_model
+
+
+def determine_policy_source(logdir):
+    """
+    Determine the policy source based on directory path
+    
+    Args:
+        logdir: Model file directory
+        
+    Returns:
+        str: Policy source ('EPO' or 'legged-loco')
+    """
+    if "EPO" in logdir:
+        return "EPO"
+    elif "legged-loco" in logdir:
+        return "legged-loco"
+    else:
+        return "unknown"
+
+
+def load_legged_loco_policy(logdir, device):
+    """
+    Load legged-loco policy (single JIT model)
+    
+    Args:
+        logdir: Model file directory
+        device: Computing device
+        
+    Returns:
+        policy: Loaded policy model
+    """
+    policy_path = os.path.join(logdir, 'exported', 'policy.jit')
+    
+    if not os.path.exists(policy_path):
+        raise FileNotFoundError(f"Policy file not found: {policy_path}")
+    
+    # Load JIT policy
+    policy = torch.jit.load(policy_path, map_location=device)
+    policy.eval()
+    
+    return policy
+
+
+def create_legged_loco_observation_processor():
+    """
+    Create observation processing function for legged-loco policy
+    
+    Returns:
+        turn_obs: Observation processing function
+    """
+    def turn_obs(proprio, depth_latent_yaw, proprio_history, n_proprio, n_depth_latent, n_hist_len):
+        """
+        Process observations for legged-loco policy
+        
+        Args:
+            proprio: Current proprioceptive data [batch_size, 45]
+            depth_latent_yaw: Depth features (unused for base policy)
+            proprio_history: Historical proprioceptive data [batch_size, hist_len, 45]
+            n_proprio: Proprioceptive data dimension (45)
+            n_depth_latent: Depth feature dimension (unused)
+            n_hist_len: History length (9)
+            
+        Returns:
+            obs: Processed observation vector [batch_size, 450]
+        """
+        # legged-loco expects: [current_obs, hist_obs_t-1, hist_obs_t-2, ..., hist_obs_t-9]
+        # Shape: [batch_size, 45 * 10] = [batch_size, 450]
+        
+        # Reshape history: [batch_size, hist_len, n_proprio] -> [batch_size, hist_len * n_proprio]
+        flattened_history = proprio_history.view(proprio_history.shape[0], -1)
+        
+        # Concatenate current observation with flattened history
+        obs = torch.cat([proprio, flattened_history], dim=-1)
+        
+        return obs
+    
+    return turn_obs
+
+
+def create_dummy_depth_encoder():
+    """
+    Create dummy depth encoder for legged-loco base policy (no vision)
+    
+    Returns:
+        encode_depth: Dummy depth encoding function
+    """
+    def encode_depth(depth_image, proprio):
+        """
+        Dummy depth encoding function - returns zeros for base policy
+        
+        Args:
+            depth_image: Depth image (unused)
+            proprio: Proprioceptive data
+            
+        Returns:
+            depth_latent_yaw: Dummy depth features (zeros)
+        """
+        batch_size = proprio.shape[0]
+        device = proprio.device
+        
+        # Return zeros for depth features (32) + yaw (2) = 34 dimensions
+        dummy_depth_latent_yaw = torch.zeros(batch_size, 34, device=device, dtype=torch.float32)
+        
+        return dummy_depth_latent_yaw
+    
+    return encode_depth
+
+
+def create_legged_loco_policy_function(policy):
+    """
+    Create policy function for legged-loco
+    
+    Args:
+        policy: Loaded JIT policy
+        
+    Returns:
+        actor_model: Policy function
+    """
+    def actor_model(obs):
+        """
+        Generate action using legged-loco policy
+        
+        Args:
+            obs: Observation vector [batch_size, 450]
+            
+        Returns:
+            action: Action vector [batch_size, 12]
+        """
+        action = policy(obs)
+        return action
+    
+    return actor_model
 
 
 @torch.inference_mode()
