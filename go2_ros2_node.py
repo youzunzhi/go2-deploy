@@ -453,7 +453,7 @@ class Go2ROS2Node(Node):
                 vy = vy * (self.cmd_ny_range[1] - self.cmd_ny_range[0]) - self.cmd_ny_range[0]
             else:
                 vy = 0
-            self.xyyaw_command = torch.tensor([[0.5, vy, yaw]], device= self.model_device, dtype= torch.float32)
+            self.xyyaw_command = torch.tensor([[vx, vy, yaw]], device= self.model_device, dtype= torch.float32)
 
         # refer to Unitree Remote Control data structure, msg.keys is a bit mask
         # 00000000 00000001 means pressing the 0-th button (R1)
@@ -559,11 +559,15 @@ class Go2ROS2Node(Node):
         yaw_info = torch.tensor([[0, delta_yaw, delta_next_yaw]], device= self.model_device, dtype= torch.float32)
         return yaw_info
 
-    #  maybe only vx used
     def _get_commands_obs(self):
         if self.move_by_wireless_remote:
-            vx, _, _ = self.xyyaw_command[0, :]
-            commands = torch.tensor([[0, 0, vx]], device= self.model_device, dtype= torch.float32)
+            vx, vy, yaw = self.xyyaw_command[0, :]
+            if self.policy_source == "legged-loco":
+                # legged-loco uses full 3DOF commands: [lin_vel_x, lin_vel_y, ang_vel_z]
+                commands = torch.tensor([[vx, vy, yaw]], device= self.model_device, dtype= torch.float32)
+            else:
+                # EPO uses only forward velocity: [0, 0, vx]
+                commands = torch.tensor([[0, 0, vx]], device= self.model_device, dtype= torch.float32)
             return commands
         else:
             return torch.tensor([[0., 0., 0.]], device=self.model_device)

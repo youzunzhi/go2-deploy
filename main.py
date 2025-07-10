@@ -75,6 +75,12 @@ def main_loop(node):
         node.use_stand_policy = False
         node.use_sport_mode = False
         
+        # Handle X button for legged-loco policy - set forward command
+        if (node.joy_stick_buffer.keys & node.WirelessButtons.X):
+            if node.policy_source == "legged-loco":
+                node.get_logger().info("X pressed, setting legged-loco command to [0.4, 0, 0]")
+                node.xyyaw_command = torch.tensor([[0.4, 0.0, 0.0]], device=node.model_device, dtype=torch.float32)
+        
         start_time = time.monotonic()
 
         proprio = node.get_proprio()
