@@ -241,11 +241,6 @@ class Go2ROS2Node(Node):
 
         # observation
         self.clip_obs = self.cfg["normalization"]["clip_observations"]
-
-        # controls
-        self.control_type = self.cfg["control"]["control_type"]
-        if not (self.control_type == "P"):
-            raise NotImplementedError("Only position control is supported for now.")
         
         self.p_gains = []
         for i in range(self.NUM_DOF):

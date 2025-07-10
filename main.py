@@ -220,18 +220,36 @@ def load_configuration(logdir):
     else:
         raise ValueError(f"Unknown policy source: {policy_source}")
     
-    # Common configuration extraction
-    config_dict.update({
-        "control": {
-            "control_type": full_config.get("control", {}).get("control_type", "P"),
-            "stiffness": full_config.get("control", {}).get("stiffness", {}),
-            "damping": full_config.get("control", {}).get("damping", {}),
-            "action_scale": full_config.get("control", {}).get("action_scale", 0.25),
-        },
-        "init_state": {
-            "default_joint_angles": full_config.get("init_state", {}).get("default_joint_angles", {})
-        }
-    })
+    # Extract control parameters based on policy source
+    if policy_source == "EPO":
+        # EPO stores control parameters under "control" key
+        control_config = full_config.get("control", {})
+        config_dict.update({
+            "control": {
+                "stiffness": control_config.get("stiffness", {}),
+                "damping": control_config.get("damping", {}),
+                "action_scale": control_config.get("action_scale", 0.25),
+            },
+            "init_state": {
+                "default_joint_angles": full_config.get("init_state", {}).get("default_joint_angles", {})
+            }
+        })
+    elif policy_source == "legged-loco":
+        # legged-loco stores control parameters in scene.robot.actuators.base_legs
+        actuator_config = full_config.get("scene", {}).get("robot", {}).get("actuators", {}).get("base_legs", {})
+        action_config = full_config.get("actions", {}).get("joint_pos", {})
+        init_state_config = full_config.get("scene", {}).get("robot", {}).get("init_state", {})
+        
+        config_dict.update({
+            "control": {
+                "stiffness": actuator_config.get("stiffness", 40.0),  # Default from legged-loco
+                "damping": actuator_config.get("damping", 1.0),      # Default from legged-loco
+                "action_scale": action_config.get("scale", 0.25),    # Default from legged-loco
+            },
+            "init_state": {
+                "default_joint_angles": init_state_config.get("joint_pos", {})
+            }
+        })
     
     # Set control cycle (fixed at 20ms, different from training)
     duration = 0.02
