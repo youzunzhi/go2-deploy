@@ -15,6 +15,7 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 from torch import nn
 import torch.jit
+import yaml
 
 from rsl_rl import modules
 from rsl_rl.modules import StateHistoryEncoder, RecurrentDepthBackbone, DepthOnlyFCBackbone58x87
@@ -176,22 +177,14 @@ def load_configuration(logdir):
     """
     assert logdir is not None, "Please provide a logdir"
     
-    # Load full training configuration file
-    config_path = osp.join(logdir, "config.json")
-    with open(config_path, "r") as f:
-        full_config = json.load(f, object_pairs_hook=OrderedDict)
-    
-    # Determine policy source based on config structure
-    if "control" in full_config and "control_type" in full_config["control"]:
-        policy_source = "EPO"
-    elif "scene" in full_config and "robot" in full_config["scene"]:
-        policy_source = "legged-loco"
-    else:
-        policy_source = "unknown"
-    
+    policy_source = determine_policy_source(logdir)
+
     # Extract only the necessary parameters that are actually used
     if policy_source == "EPO":
         # EPO uses observation scaling from config.json
+        config_path = osp.join(logdir, "config.json")
+        with open(config_path, "r") as f:
+            full_config = json.load(f, object_pairs_hook=OrderedDict)
         config_dict = {
             "normalization": {
                 "clip_observations": full_config["normalization"]["clip_observations"],
@@ -203,15 +196,6 @@ def load_configuration(logdir):
                 }
             }
         }
-        
-        # Handle optional clip_actions_method parameter
-        if "clip_actions_method" in full_config["normalization"]:
-            config_dict["normalization"]["clip_actions_method"] = full_config["normalization"]["clip_actions_method"]
-            
-            # Add clip_actions_high and clip_actions_low if hard clipping is used
-            if full_config["normalization"].get("clip_actions_method") == "hard":
-                config_dict["normalization"]["clip_actions_high"] = full_config["normalization"]["clip_actions_high"]
-                config_dict["normalization"]["clip_actions_low"] = full_config["normalization"]["clip_actions_low"]
         
         # EPO stores control parameters under "control" key
         control_config = full_config.get("control", {})
@@ -228,6 +212,9 @@ def load_configuration(logdir):
         })
         
     elif policy_source == "legged-loco":
+        config_path = osp.join(logdir, "params/env.yaml")
+        with open(config_path, "r") as f:
+            full_config = yaml.safe_load(f)
         # legged-loco does NOT use observation scaling (confirmed from training code)
         # All scale values are null in env.yaml and empirical_normalization: false
         config_dict = {
@@ -537,7 +524,7 @@ def load_legged_loco_policy(logdir, device):
     Returns:
         policy: Loaded policy model
     """
-    policy_path = os.path.join(logdir, 'exported', 'policy.jit')
+    policy_path = os.path.join(logdir, 'policy.jit')
     
     if not os.path.exists(policy_path):
         raise FileNotFoundError(f"Policy file not found: {policy_path}")
