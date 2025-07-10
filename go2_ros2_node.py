@@ -145,10 +145,11 @@ class Go2ROS2Node(Node):
             robot_class_name= "Go2",
             dryrun= True, # if True, the robot will not send commands to the real robot
             mode= "locomotion",
+            policy_source= "EPO", # Policy source: "EPO" or "legged-loco"
         ):
         super().__init__("unitree_ros2_real")
-        self.NUM_DOF = getattr(RobotCfgs, robot_class_name).NUM_DOF
-        self.NUM_ACTIONS = getattr(RobotCfgs, robot_class_name).NUM_ACTIONS
+        self.NUM_DOF = getattr(Go2RobotCfgs, robot_class_name).NUM_DOF
+        self.NUM_ACTIONS = getattr(Go2RobotCfgs, robot_class_name).NUM_ACTIONS
         self.robot_namespace = robot_namespace
         self.low_state_topic = low_state_topic
         self.low_cmd_topic = low_cmd_topic if not dryrun else low_cmd_topic + "_dryrun_" + str(np.random.randint(0, 65535))
@@ -169,13 +170,18 @@ class Go2ROS2Node(Node):
         self.robot_class_name = robot_class_name
         self.dryrun = dryrun
         self.mode = mode
+        self.policy_source = policy_source
 
-        self.dof_map = getattr(RobotCfgs, robot_class_name).dof_map
-        self.dof_names = getattr(RobotCfgs, robot_class_name).dof_names
-        self.dof_signs = getattr(RobotCfgs, robot_class_name).dof_signs
-        self.turn_on_motor_mode = getattr(RobotCfgs, robot_class_name).turn_on_motor_mode
+        self.dof_map = getattr(Go2RobotCfgs, robot_class_name).dof_map
+        self.dof_names = getattr(Go2RobotCfgs, robot_class_name).dof_names
+        self.dof_signs = getattr(Go2RobotCfgs, robot_class_name).dof_signs
+        self.turn_on_motor_mode = getattr(Go2RobotCfgs, robot_class_name).turn_on_motor_mode
 
-        self.n_proprio = 53
+        # Set observation dimensions based on policy source
+        if policy_source == "legged-loco":
+            self.n_proprio = 45  # base_ang_vel(3) + base_rpy(3) + velocity_commands(3) + joint_pos(12) + joint_vel(12) + actions(12)
+        else:
+            self.n_proprio = 53  # EPO format: ang_vel(3) + imu(2) + yaw_info(3) + commands(3) + locomotion_walk(2) + dof_pos(12) + dof_vel(12) + last_actions(12) + contact(4)
         self.n_depth_latent = 32
         self.n_hist_len = 10
 
@@ -277,8 +283,8 @@ class Go2ROS2Node(Node):
         self.actions = torch.zeros(self.NUM_ACTIONS, device= self.model_device, dtype= torch.float32)    
 
         ###################### hardware related #####################
-        self.joint_limits_high = getattr(RobotCfgs, self.robot_class_name).joint_limits_high.to(self.model_device)
-        self.joint_limits_low = getattr(RobotCfgs, self.robot_class_name).joint_limits_low.to(self.model_device)
+        self.joint_limits_high = getattr(Go2RobotCfgs, self.robot_class_name).joint_limits_high.to(self.model_device)
+        self.joint_limits_low = getattr(Go2RobotCfgs, self.robot_class_name).joint_limits_low.to(self.model_device)
         joint_pos_mid = (self.joint_limits_high + self.joint_limits_low) / 2
         joint_pos_range = (self.joint_limits_high - self.joint_limits_low) / 2
         self.joint_pos_protect_high = joint_pos_mid + joint_pos_range * self.dof_pos_protect_ratio
@@ -485,6 +491,18 @@ class Go2ROS2Node(Node):
         imu_obs = torch.tensor([[roll, pitch]], device= self.model_device, dtype= torch.float32)
         return imu_obs
 
+    def _get_base_rpy_obs(self):
+        """Get base roll-pitch-yaw for legged-loco policy"""
+        quat_xyzw = torch.tensor([
+            self.low_state_buffer.imu_state.quaternion[1],
+            self.low_state_buffer.imu_state.quaternion[2],
+            self.low_state_buffer.imu_state.quaternion[3],
+            self.low_state_buffer.imu_state.quaternion[0],
+            ], device= self.model_device, dtype= torch.float32).unsqueeze(0)
+        roll, pitch, yaw = get_euler_xyz(quat_xyzw)
+        base_rpy = torch.tensor([[roll, pitch, yaw]], device= self.model_device, dtype= torch.float32)
+        return base_rpy
+
     def _get_delta_yaw_obs(self):
         yaw = 0
         delta_yaw, delta_next_yaw = 0, 0
@@ -533,19 +551,8 @@ class Go2ROS2Node(Node):
         ang_vel = self._get_ang_vel_obs()  # (1, 3)
         ang_vel_time = time.monotonic()
 
-        imu = self._get_imu_obs()  # (1, 2)
-        imu_time = time.monotonic()
-
-        yaw_info = self._get_delta_yaw_obs()  # (1, 3)
-        yaw_time = time.monotonic()
-
         commands = self._get_commands_obs()  # (1, 3)
         commands_time = time.monotonic()
-
-        if self.mode == "locomotion":
-            locomotion_walk = torch.tensor([[1, 0]], device= self.model_device, dtype= torch.float32) # locomotion
-        elif self.mode == "walk":
-            locomotion_walk = torch.tensor([[0, 1]], device= self.model_device, dtype= torch.float32) # walk
 
         dof_pos = self._get_dof_pos_obs()  # (1, 12)
         dof_pos_time = time.monotonic()
@@ -556,13 +563,31 @@ class Go2ROS2Node(Node):
         last_actions = self._get_last_actions_obs().view(1, -1)  # (1, 12)
         last_action_time = time.monotonic()
 
-        contact = self._get_contact_filt_obs()  # (1, 4)
-        contact_time = time.monotonic()
-        
-        proprio = torch.cat([ang_vel, imu, yaw_info, commands, locomotion_walk,
-                        dof_pos, dof_vel,
-                        last_actions, 
-                        contact], dim=-1)
+        # Check if using legged-loco policy format
+        if hasattr(self, 'policy_source') and self.policy_source == 'legged-loco':
+            # legged-loco format: base_ang_vel, base_rpy, velocity_commands, joint_pos, joint_vel, actions
+            base_rpy = self._get_base_rpy_obs()  # (1, 3)
+            
+            proprio = torch.cat([ang_vel, base_rpy, commands,
+                            dof_pos, dof_vel, last_actions], dim=-1)
+        else:
+            # EPO format: ang_vel, imu, yaw_info, commands, locomotion_walk, dof_pos, dof_vel, last_actions, contact
+            imu = self._get_imu_obs()  # (1, 2)
+            imu_time = time.monotonic()
+
+            yaw_info = self._get_delta_yaw_obs()  # (1, 3)
+            yaw_time = time.monotonic()
+
+            if self.mode == "locomotion":
+                locomotion_walk = torch.tensor([[1, 0]], device= self.model_device, dtype= torch.float32) # locomotion
+            elif self.mode == "walk":
+                locomotion_walk = torch.tensor([[0, 1]], device= self.model_device, dtype= torch.float32) # walk
+
+            contact = self._get_contact_filt_obs()  # (1, 4)
+            contact_time = time.monotonic()
+            
+            proprio = torch.cat([ang_vel, imu, yaw_info, commands, locomotion_walk,
+                            dof_pos, dof_vel, last_actions, contact], dim=-1)
 
         self.proprio_history_buf = torch.where(
             (self.episode_length_buf <= 1)[:, None, None], 
@@ -600,8 +625,8 @@ class Go2ROS2Node(Node):
             clipped_action: Actions clipped to joint limits
         """
         # Get joint limits from robot configuration
-        joint_limits_high = getattr(RobotCfgs, self.robot_class_name).joint_limits_high.to(self.model_device)
-        joint_limits_low = getattr(RobotCfgs, self.robot_class_name).joint_limits_low.to(self.model_device)
+        joint_limits_high = getattr(Go2RobotCfgs, self.robot_class_name).joint_limits_high.to(self.model_device)
+        joint_limits_low = getattr(Go2RobotCfgs, self.robot_class_name).joint_limits_low.to(self.model_device)
         
         # Clip actions to joint limits
         clipped_action = torch.clamp(robot_coordinates_action, 
@@ -623,7 +648,7 @@ class Go2ROS2Node(Node):
             clipped_action: Actions clipped to torque limits
         """
         # Get torque limits from robot configuration
-        torque_limits = getattr(RobotCfgs, self.robot_class_name).torque_limits.to(self.model_device)
+        torque_limits = getattr(Go2RobotCfgs, self.robot_class_name).torque_limits.to(self.model_device)
         
         # Convert torque limits to position limits using PD control formula
         # tau = kp * (target - current) - kd * vel

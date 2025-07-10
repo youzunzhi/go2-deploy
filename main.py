@@ -169,18 +169,22 @@ def load_configuration(logdir):
     Returns:
         config_dict: Filtered configuration dictionary with only used parameters
         duration: Control cycle duration
+        policy_source: Policy source type ('EPO' or 'legged-loco')
     """
     assert logdir is not None, "Please provide a logdir"
     
     # Try to load configuration file - support both JSON and YAML formats
+    policy_source = None
     if osp.exists(osp.join(logdir, "config.json")):
         config_path = osp.join(logdir, "config.json")
         with open(config_path, "r") as f:
             full_config = json.load(f, object_pairs_hook=OrderedDict)
+        policy_source = "EPO"
     elif osp.exists(osp.join(logdir, "params", "config.yaml")):
         config_path = osp.join(logdir, "params", "config.yaml")
         with open(config_path, "r") as f:
             full_config = yaml.safe_load(f)
+        policy_source = "legged-loco"
     else:
         raise FileNotFoundError(f"Configuration file not found in {logdir}. ")
     
@@ -210,7 +214,7 @@ def load_configuration(logdir):
     # Set control cycle (fixed at 20ms, different from training)
     duration = 0.02
     
-    return config_dict, duration
+    return config_dict, duration, policy_source
 
 
 def load_base_model(logdir, device):
@@ -425,7 +429,7 @@ def main(args):
     rclpy.init()
 
     # 1. Load configuration
-    config_dict, duration = load_configuration(args.logdir)
+    config_dict, duration, policy_source = load_configuration(args.logdir)
     device = "cuda"
 
     # 2. Create ROS node
@@ -435,6 +439,7 @@ def main(args):
         model_device=device,
         dryrun=not args.nodryrun,
         mode=args.mode,
+        policy_source=policy_source,
     )
 
     # 3. Print configuration information
