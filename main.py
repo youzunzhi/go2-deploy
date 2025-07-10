@@ -241,6 +241,26 @@ def load_configuration(logdir):
         action_config = full_config.get("actions", {}).get("joint_pos", {})
         init_state_config = full_config.get("scene", {}).get("robot", {}).get("init_state", {})
         
+        # Extract joint positions from legged-loco config
+        joint_pos = init_state_config.get("joint_pos", {})
+        
+        # If joint_pos is empty, use EPO's default joint angles (identical values)
+        if not joint_pos:
+            joint_pos = {
+                "FL_hip_joint": 0.1,
+                "RL_hip_joint": 0.1,
+                "FR_hip_joint": -0.1,
+                "RR_hip_joint": -0.1,
+                "FL_thigh_joint": 0.8,
+                "RL_thigh_joint": 1.0,
+                "FR_thigh_joint": 0.8,
+                "RR_thigh_joint": 1.0,
+                "FL_calf_joint": -1.5,
+                "RL_calf_joint": -1.5,
+                "FR_calf_joint": -1.5,
+                "RR_calf_joint": -1.5
+            }
+        
         config_dict.update({
             "control": {
                 "control_type": "P",  # Default for legged-loco
@@ -249,7 +269,7 @@ def load_configuration(logdir):
                 "action_scale": action_config.get("scale", 0.25),    # Default from legged-loco
             },
             "init_state": {
-                "default_joint_angles": init_state_config.get("joint_pos", {})
+                "default_joint_angles": joint_pos
             }
         })
     else:
