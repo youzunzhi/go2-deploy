@@ -6,7 +6,6 @@ import os
 import ast
 import os.path as osp
 import json
-import yaml
 import time
 from collections import OrderedDict
 from copy import deepcopy
@@ -161,7 +160,6 @@ def handle_timing_mode(env_node, timing_mode, duration):
 def load_configuration(logdir):
     """
     Load only necessary configuration parameters for deployment
-    Supports both JSON (EPO) and YAML (legged-loco) configuration formats
     
     Args:
         logdir: Directory path containing the configuration file
@@ -169,40 +167,60 @@ def load_configuration(logdir):
     Returns:
         config_dict: Filtered configuration dictionary with only used parameters
         duration: Control cycle duration
-        policy_source: Policy source type ('EPO' or 'legged-loco')
     """
     assert logdir is not None, "Please provide a logdir"
     
-    # Try to load configuration file - support both JSON and YAML formats
-    policy_source = None
-    if osp.exists(osp.join(logdir, "config.json")):
-        config_path = osp.join(logdir, "config.json")
-        with open(config_path, "r") as f:
-            full_config = json.load(f, object_pairs_hook=OrderedDict)
+    # Load full training configuration file
+    config_path = osp.join(logdir, "config.json")
+    with open(config_path, "r") as f:
+        full_config = json.load(f, object_pairs_hook=OrderedDict)
+    
+    # Determine policy source based on config structure
+    if "control" in full_config and "control_type" in full_config["control"]:
         policy_source = "EPO"
-    elif osp.exists(osp.join(logdir, "params", "config.yaml")):
-        config_path = osp.join(logdir, "params", "config.yaml")
-        with open(config_path, "r") as f:
-            full_config = yaml.safe_load(f)
+    elif "scene" in full_config and "robot" in full_config["scene"]:
         policy_source = "legged-loco"
     else:
-        raise FileNotFoundError(f"Configuration file not found in {logdir}. ")
+        policy_source = "unknown"
     
-    # Extract normalization parameters based on policy source
+    # Extract only the necessary parameters that are actually used
     if policy_source == "EPO":
         # EPO uses observation scaling from config.json
-        normalization = full_config.get("normalization", {})
         config_dict = {
             "normalization": {
-                "clip_observations": normalization.get("clip_observations", 100.0),
-                "clip_actions": normalization.get("clip_actions", 100.0),
+                "clip_observations": full_config["normalization"]["clip_observations"],
+                "clip_actions": full_config["normalization"]["clip_actions"],
                 "obs_scales": {
-                    "ang_vel": normalization.get("obs_scales", {}).get("ang_vel", 0.25),
-                    "dof_pos": normalization.get("obs_scales", {}).get("dof_pos", 1.0),
-                    "dof_vel": normalization.get("obs_scales", {}).get("dof_vel", 0.05)
+                    "ang_vel": full_config["normalization"]["obs_scales"]["ang_vel"],
+                    "dof_pos": full_config["normalization"]["obs_scales"]["dof_pos"],
+                    "dof_vel": full_config["normalization"]["obs_scales"]["dof_vel"]
                 }
             }
         }
+        
+        # Handle optional clip_actions_method parameter
+        if "clip_actions_method" in full_config["normalization"]:
+            config_dict["normalization"]["clip_actions_method"] = full_config["normalization"]["clip_actions_method"]
+            
+            # Add clip_actions_high and clip_actions_low if hard clipping is used
+            if full_config["normalization"].get("clip_actions_method") == "hard":
+                config_dict["normalization"]["clip_actions_high"] = full_config["normalization"]["clip_actions_high"]
+                config_dict["normalization"]["clip_actions_low"] = full_config["normalization"]["clip_actions_low"]
+        
+        # EPO stores control parameters under "control" key
+        control_config = full_config.get("control", {})
+        config_dict.update({
+            "control": {
+                "control_type": control_config.get("control_type", "P"),
+                "stiffness": control_config.get("stiffness", {}),
+                "damping": control_config.get("damping", {}),
+                "action_scale": control_config.get("action_scale", 0.25),
+            },
+            "init_state": {
+                "default_joint_angles": full_config.get("init_state", {}).get("default_joint_angles", {})
+            }
+        })
+        
     elif policy_source == "legged-loco":
         # legged-loco does NOT use observation scaling (confirmed from training code)
         # All scale values are null in env.yaml and empirical_normalization: false
@@ -217,24 +235,7 @@ def load_configuration(logdir):
                 }
             }
         }
-    else:
-        raise ValueError(f"Unknown policy source: {policy_source}")
-    
-    # Extract control parameters based on policy source
-    if policy_source == "EPO":
-        # EPO stores control parameters under "control" key
-        control_config = full_config.get("control", {})
-        config_dict.update({
-            "control": {
-                "stiffness": control_config.get("stiffness", {}),
-                "damping": control_config.get("damping", {}),
-                "action_scale": control_config.get("action_scale", 0.25),
-            },
-            "init_state": {
-                "default_joint_angles": full_config.get("init_state", {}).get("default_joint_angles", {})
-            }
-        })
-    elif policy_source == "legged-loco":
+        
         # legged-loco stores control parameters in scene.robot.actuators.base_legs
         actuator_config = full_config.get("scene", {}).get("robot", {}).get("actuators", {}).get("base_legs", {})
         action_config = full_config.get("actions", {}).get("joint_pos", {})
@@ -242,6 +243,7 @@ def load_configuration(logdir):
         
         config_dict.update({
             "control": {
+                "control_type": "P",  # Default for legged-loco
                 "stiffness": actuator_config.get("stiffness", 40.0),  # Default from legged-loco
                 "damping": actuator_config.get("damping", 1.0),      # Default from legged-loco
                 "action_scale": action_config.get("scale", 0.25),    # Default from legged-loco
@@ -250,11 +252,13 @@ def load_configuration(logdir):
                 "default_joint_angles": init_state_config.get("joint_pos", {})
             }
         })
+    else:
+        raise ValueError(f"Unknown policy source: {policy_source}")
     
     # Set control cycle (fixed at 20ms, different from training)
     duration = 0.02
     
-    return config_dict, duration, policy_source
+    return config_dict, duration
 
 
 def load_base_model(logdir, device):
@@ -469,7 +473,7 @@ def main(args):
     rclpy.init()
 
     # 1. Load configuration
-    config_dict, duration, policy_source = load_configuration(args.logdir)
+    config_dict, duration = load_configuration(args.logdir)
     device = "cuda"
 
     # 2. Create ROS node
@@ -479,7 +483,6 @@ def main(args):
         model_device=device,
         dryrun=not args.nodryrun,
         mode=args.mode,
-        policy_source=policy_source,
     )
 
     # 3. Print configuration information

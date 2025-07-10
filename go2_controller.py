@@ -8,6 +8,7 @@ import io
 import json
 import time
 import logging
+import os
 from typing import Dict, Optional, Any
 from threading import Lock
 
@@ -17,9 +18,10 @@ import requests
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
-from sensor_msgs.msg import Image, CompressedImage
-from std_msgs.msg import String, Bool
+from sensor_msgs.msg import Image
+from std_msgs.msg import String
 from cv_bridge import CvBridge
+import pyrealsense2 as rs
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -39,12 +41,17 @@ class Go2VelocityController(Node):
         self.server_url = f"http://{server_ip}:{server_port}"
         self.instruction = instruction
         
-        # ROS2 setup
+        # Image logging setup
+        self.image_log_dir = "captured_images"
+        os.makedirs(self.image_log_dir, exist_ok=True)
+        logger.info(f"📷 Saving captured images to '{self.image_log_dir}/'")
+
+        # ROS2 and Camera setup
         self.bridge = CvBridge()
         self._setup_ros_interfaces()
+        self._setup_camera()
         
         # Robot state
-        self.latest_image: Optional[Image] = None
         self.is_processing = False
         self.processing_lock = Lock()
         
@@ -71,8 +78,33 @@ class Go2VelocityController(Node):
         logger.info(f"📡 Server: {self.server_url}")
         logger.info(f"🎯 Instruction: '{self.instruction}'")
     
+    def _setup_camera(self):
+        """Initialize the RealSense camera using the verified stable method."""
+        logger.info("📷 Initializing RealSense camera...")
+        try:
+            self.rs_pipeline = rs.pipeline()
+            self.rs_config = rs.config()
+
+            # Configure and enable only the color stream, which was proven to be stable.
+            width, height, fps = 640, 480, 30
+            logger.info(f"Configuring stream: Color {width}x{height} @ {fps}fps...")
+            self.rs_config.enable_stream(rs.stream.color, width, height, rs.format.bgr8, fps)
+            
+            logger.info("Starting camera pipeline...")
+            self.rs_profile = self.rs_pipeline.start(self.rs_config)
+            
+            # Warm up the camera to allow auto-exposure to settle.
+            logger.info("📷 Warming up the camera for auto-exposure...")
+            for _ in range(30):
+                self.rs_pipeline.wait_for_frames()
+
+            logger.info("✅ RealSense camera initialized and ready.")
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize RealSense camera: {e}")
+            raise RuntimeError(f"Could not initialize RealSense camera: {e}")
+    
     def _setup_ros_interfaces(self):
-        """Setup ROS2 publishers and subscribers"""
+        """Setup ROS2 publishers"""
         
         qos_profile = QoSProfile(
             reliability=ReliabilityPolicy.RELIABLE,
@@ -88,41 +120,24 @@ class Go2VelocityController(Node):
             String, '/navila/status', qos_profile
         )
         
-        # Subscribers - support both raw and compressed images
-        self.image_sub = self.create_subscription(
-            Image,
-            '/camera/color/image_raw',
-            self.image_callback,
-            qos_profile
-        )
-        
-        self.compressed_image_sub = self.create_subscription(
-            CompressedImage,
-            '/camera/color/image_raw/compressed',
-            self.compressed_image_callback,
-            qos_profile
-        )
-        
-        logger.info("📡 ROS2 interfaces initialized")
+        # Image subscribers are no longer needed, camera is accessed directly
+        logger.info("📡 ROS2 publishers initialized")
     
-    def image_callback(self, msg: Image):
-        """Callback for raw image messages"""
-        self.latest_image = msg
-        self.stats['last_image_time'] = time.time()
-    
-    def compressed_image_callback(self, msg: CompressedImage):
-        """Callback for compressed image messages"""
+    def _get_image_from_camera(self) -> Optional[np.ndarray]:
+        """Gets a color image frame from the RealSense camera."""
         try:
-            np_arr = np.frombuffer(msg.data, np.uint8)
-            cv_image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-            
-            if cv_image is not None:
-                image_msg = self.bridge.cv2_to_imgmsg(cv_image, 'bgr8')
-                image_msg.header = msg.header
-                self.latest_image = image_msg
-                self.stats['last_image_time'] = time.time()
+            frames = self.rs_pipeline.wait_for_frames(1000)  # Increased timeout to 1000ms
+            color_frame = frames.get_color_frame()
+            if not color_frame:
+                logger.warning("📷 No color frame received from camera")
+                return None
+
+            color_image = np.asanyarray(color_frame.get_data())
+            self.stats['last_image_time'] = time.time()
+            return color_image
         except Exception as e:
-            logger.error(f"❌ Failed to process compressed image: {e}")
+            logger.error(f"❌ Failed to get image from camera: {e}")
+            return None
     
     def _initialize_server_connection(self):
         """Initialize connection to VLM velocity command server"""
@@ -163,11 +178,10 @@ class Go2VelocityController(Node):
         logger.error("❌ Failed to connect to server after all retries")
         raise RuntimeError("Could not establish server connection")
     
-    def _send_image_to_server(self, image_msg: Image) -> Optional[Dict[str, Any]]:
+    def _send_image_to_server(self, cv_image: np.ndarray) -> Optional[Dict[str, Any]]:
         """Send image to VLM server and get velocity command"""
         try:
-            # Convert ROS Image to OpenCV format
-            cv_image = self.bridge.imgmsg_to_cv2(image_msg, "bgr8")
+            # Convert ROS Image to OpenCV format is no longer needed
             
             # Encode as JPEG for transmission
             is_success, buffer = cv2.imencode('.jpg', cv_image, [
@@ -277,17 +291,6 @@ class Go2VelocityController(Node):
     def control_loop(self):
         """Main control loop - called by ROS timer"""
         
-        # Check if we have recent image data
-        if self.latest_image is None:
-            logger.warning("📷 No image data received yet")
-            return
-        
-        # Check image age for safety
-        image_age = time.time() - self.stats.get('last_image_time', 0)
-        if image_age > 10.0:  # 10 second timeout
-            logger.error(f"📷 Image data too old ({image_age:.1f}s)")
-            return
-        
         # Skip if already processing
         if not self.processing_lock.acquire(blocking=False):
             logger.debug("🔄 Skipping cycle - already processing")
@@ -296,9 +299,30 @@ class Go2VelocityController(Node):
         try:
             self.is_processing = True
             
+            # Get image directly from the camera
+            logger.debug("📷 Acquiring image from RealSense camera...")
+            cv_image = self._get_image_from_camera()
+
+            if cv_image is None:
+                logger.warning("⚠️ Failed to acquire image, skipping control cycle.")
+                # The lock will be released in the 'finally' block.
+                # No need to release it here, which caused the crash.
+                return
+            
+            # Save the captured image to a file
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            milliseconds = int((time.time() - int(time.time())) * 1000)
+            image_filename = f"img_{timestamp}_{milliseconds:03d}.jpg"
+            image_path = os.path.join(self.image_log_dir, image_filename)
+            try:
+                cv2.imwrite(image_path, cv_image)
+                logger.debug(f"💾 Image saved to {image_path}")
+            except Exception as e:
+                logger.error(f"❌ Failed to save image to {image_path}: {e}")
+            
             # Send image to VLM server and get velocity command
             logger.debug("📤 Sending image to VLM server...")
-            velocity_result = self._send_image_to_server(self.latest_image)
+            velocity_result = self._send_image_to_server(cv_image)
             
             if velocity_result:
                 self._process_velocity_command(velocity_result)
@@ -318,19 +342,24 @@ class Go2VelocityController(Node):
             
         finally:
             self.is_processing = False
-            self.processing_lock.release()
+            # This ensures the lock is always released, but only once.
+            if self.processing_lock.locked():
+                self.processing_lock.release()
     
     def get_status_summary(self) -> Dict[str, Any]:
         """Get comprehensive status summary"""
         current_time = time.time()
+        
+        last_image_time = self.stats.get('last_image_time', 0)
+        image_age = current_time - last_image_time if last_image_time > 0 else -1
         
         return {
             'node_status': 'active',
             'server_url': self.server_url,
             'instruction': self.instruction,
             'processing': self.is_processing,
-            'has_image': self.latest_image is not None,
-            'image_age': current_time - self.stats.get('last_image_time', 0),
+            'has_image': last_image_time > 0,
+            'image_age': image_age,
             'current_velocity': self.current_velocity,
             'last_velocity_time': self.last_velocity_time,
             'stats': self.stats.copy()
@@ -339,6 +368,11 @@ class Go2VelocityController(Node):
     def shutdown(self):
         """Graceful shutdown"""
         logger.info("🛑 Shutting down velocity controller...")
+
+        # Stop the camera pipeline
+        if hasattr(self, 'rs_pipeline'):
+            logger.info("📷 Stopping RealSense pipeline...")
+            self.rs_pipeline.stop()
         
         # Send final stop command
         print("=" * 60)
@@ -361,7 +395,7 @@ def main(args=None):
     rclpy.init(args=args)
     
     # Configuration - update these for your setup
-    SERVER_IP = "192.168.1.100"  # VLM server IP
+    SERVER_IP = "10.165.232.223"  # VLM server internal IP
     SERVER_PORT = 8888
     INSTRUCTION = "Navigate to the door and stop in front of it"
     
