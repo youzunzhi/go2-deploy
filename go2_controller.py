@@ -422,7 +422,7 @@ def main(args=None):
             controller.shutdown()
         
         logger.info("🏁 Shutting down ROS2...")
-        rclpy.shutdown()
+        rclpy.shutdown() # shutdown ROS2
 
 
 if __name__ == '__main__':
