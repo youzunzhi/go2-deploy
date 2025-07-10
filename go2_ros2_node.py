@@ -60,48 +60,99 @@ def get_euler_xyz(q):
 class Go2RobotCfgs:
     NUM_DOF = 12
     NUM_ACTIONS = 12
-    # The order of joints has been reindexed in simulation.
-    # So we do not need here.
-    dof_map = [
-        0, 1, 2,
-        3, 4, 5,
-        6, 7, 8,
-        9, 10, 11,
-    ]
-    dof_names = [
-        "FR_hip_joint",
-        "FR_thigh_joint",
-        "FR_calf_joint",
-        "FL_hip_joint",
-        "FL_thigh_joint",
-        "FL_calf_joint",
-        "RR_hip_joint",
-        "RR_thigh_joint",
-        "RR_calf_joint",
-        "RL_hip_joint",
-        "RL_thigh_joint",
-        "RL_calf_joint",
-    ]
-    dof_signs = [1.] * 12
-    joint_limits_high = torch.tensor([
-        1.0472, 3.4907, -0.83776,
-        1.0472, 3.4907, -0.83776,
-        1.0472, 4.5379, -0.83776,
-        1.0472, 4.5379, -0.83776,
-    ], device= "cpu", dtype= torch.float32)
-    joint_limits_low = torch.tensor([
-        -1.0472, -1.5708, -2.7227,
-        -1.0472, -1.5708, -2.7227,
-        -1.0472, -0.5236, -2.7227,
-        -1.0472, -0.5236, -2.7227,
-    ], device= "cpu", dtype= torch.float32)
-    torque_limits = torch.tensor([ # from urdf and in simulation order
-        25, 40, 40,
-        25, 40, 40,
-        25, 40, 40,
-        25, 40, 40,
-    ], device= "cpu", dtype= torch.float32)
-    turn_on_motor_mode = [0x01] * 12
+    
+    @staticmethod
+    def get_config_for_policy_source(policy_source="EPO"):
+        """Get robot configuration based on policy source to handle different joint orderings"""
+        config = {
+            'NUM_DOF': 12,
+            'NUM_ACTIONS': 12,
+            'dof_signs': [1.] * 12,
+            'turn_on_motor_mode': [0x01] * 12,
+        }
+        
+        if policy_source == "legged-loco":
+            # legged-loco uses grouped joint order: [all hips, all thighs, all calves]
+            # Simulation order: FL_hip, FR_hip, RL_hip, RR_hip, FL_thigh, FR_thigh, RL_thigh, RR_thigh, FL_calf, FR_calf, RL_calf, RR_calf
+            config['dof_names'] = [
+                "FL_hip_joint",     # 0
+                "FR_hip_joint",     # 1  
+                "RL_hip_joint",     # 2
+                "RR_hip_joint",     # 3
+                "FL_thigh_joint",   # 4
+                "FR_thigh_joint",   # 5
+                "RL_thigh_joint",   # 6
+                "RR_thigh_joint",   # 7
+                "FL_calf_joint",    # 8
+                "FR_calf_joint",    # 9
+                "RL_calf_joint",    # 10
+                "RR_calf_joint",    # 11
+            ]
+            # Mapping from legged-loco simulation order to hardware order
+            # Hardware order: FR_hip(0), FR_thigh(1), FR_calf(2), FL_hip(3), FL_thigh(4), FL_calf(5), RR_hip(6), RR_thigh(7), RR_calf(8), RL_hip(9), RL_thigh(10), RL_calf(11)
+            # legged-loco sim: FL_hip(0), FR_hip(1), RL_hip(2), RR_hip(3), FL_thigh(4), FR_thigh(5), RL_thigh(6), RR_thigh(7), FL_calf(8), FR_calf(9), RL_calf(10), RR_calf(11)
+            config['dof_map'] = [
+                3, 0, 9, 6,   # Hip joints: FL->3, FR->0, RL->9, RR->6  
+                4, 1, 10, 7,  # Thigh joints: FL->4, FR->1, RL->10, RR->7
+                5, 2, 11, 8   # Calf joints: FL->5, FR->2, RL->11, RR->8
+            ]
+            # Joint limits in legged-loco simulation order
+            config['joint_limits_high'] = torch.tensor([
+                1.0472, 1.0472, 1.0472, 1.0472,    # Hip joints: FL, FR, RL, RR
+                3.4907, 3.4907, 4.5379, 4.5379,    # Thigh joints: FL, FR, RL, RR  
+                -0.83776, -0.83776, -2.7227, -2.7227  # Calf joints: FL, FR, RL, RR
+            ], device="cpu", dtype=torch.float32)
+            config['joint_limits_low'] = torch.tensor([
+                -1.0472, -1.0472, -1.0472, -1.0472,  # Hip joints: FL, FR, RL, RR
+                -1.5708, -1.5708, -0.5236, -0.5236,  # Thigh joints: FL, FR, RL, RR
+                -2.7227, -2.7227, -2.7227, -2.7227   # Calf joints: FL, FR, RL, RR
+            ], device="cpu", dtype=torch.float32)
+            config['torque_limits'] = torch.tensor([
+                25, 25, 25, 25,  # Hip joints: FL, FR, RL, RR
+                40, 40, 40, 40,  # Thigh joints: FL, FR, RL, RR
+                40, 40, 40, 40   # Calf joints: FL, FR, RL, RR
+            ], device="cpu", dtype=torch.float32)
+        else:
+            # EPO/default uses leg-grouped joint order: [FR leg, FL leg, RR leg, RL leg]
+            # Simulation order matches hardware order (reindexed in simulation)
+            config['dof_names'] = [
+                "FR_hip_joint",     # 0
+                "FR_thigh_joint",   # 1
+                "FR_calf_joint",    # 2
+                "FL_hip_joint",     # 3
+                "FL_thigh_joint",   # 4
+                "FL_calf_joint",    # 5
+                "RR_hip_joint",     # 6
+                "RR_thigh_joint",   # 7
+                "RR_calf_joint",    # 8
+                "RL_hip_joint",     # 9
+                "RL_thigh_joint",   # 10
+                "RL_calf_joint",    # 11
+            ]
+            # Identity mapping (simulation order already matches hardware)
+            config['dof_map'] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+            # Joint limits in EPO simulation order (leg-grouped)
+            config['joint_limits_high'] = torch.tensor([
+                1.0472, 3.4907, -0.83776,    # FR leg
+                1.0472, 3.4907, -0.83776,    # FL leg
+                1.0472, 4.5379, -0.83776,    # RR leg
+                1.0472, 4.5379, -0.83776,    # RL leg
+            ], device="cpu", dtype=torch.float32)
+            config['joint_limits_low'] = torch.tensor([
+                -1.0472, -1.5708, -2.7227,   # FR leg
+                -1.0472, -1.5708, -2.7227,   # FL leg
+                -1.0472, -0.5236, -2.7227,   # RR leg
+                -1.0472, -0.5236, -2.7227,   # RL leg
+            ], device="cpu", dtype=torch.float32)
+            config['torque_limits'] = torch.tensor([
+                25, 40, 40,  # FR leg
+                25, 40, 40,  # FL leg
+                25, 40, 40,  # RR leg
+                25, 40, 40,  # RL leg
+            ], device="cpu", dtype=torch.float32)
+        
+        return config
+    
     
 
 class Go2ROS2Node(Node):
@@ -148,8 +199,6 @@ class Go2ROS2Node(Node):
             policy_source= "EPO", # Policy source: "EPO" or "legged-loco"
         ):
         super().__init__("unitree_ros2_real")
-        self.NUM_DOF = getattr(Go2RobotCfgs, robot_class_name).NUM_DOF
-        self.NUM_ACTIONS = getattr(Go2RobotCfgs, robot_class_name).NUM_ACTIONS
         self.robot_namespace = robot_namespace
         self.low_state_topic = low_state_topic
         self.low_cmd_topic = low_cmd_topic if not dryrun else low_cmd_topic + "_dryrun_" + str(np.random.randint(0, 65535))
@@ -172,10 +221,14 @@ class Go2ROS2Node(Node):
         self.mode = mode
         self.policy_source = policy_source
 
-        self.dof_map = getattr(Go2RobotCfgs, robot_class_name).dof_map
-        self.dof_names = getattr(Go2RobotCfgs, robot_class_name).dof_names
-        self.dof_signs = getattr(Go2RobotCfgs, robot_class_name).dof_signs
-        self.turn_on_motor_mode = getattr(Go2RobotCfgs, robot_class_name).turn_on_motor_mode
+        # Get policy-specific robot configuration
+        self.robot_config = Go2RobotCfgs.get_config_for_policy_source(policy_source)
+        self.NUM_DOF = self.robot_config['NUM_DOF']
+        self.NUM_ACTIONS = self.robot_config['NUM_ACTIONS']
+        self.dof_map = self.robot_config['dof_map']
+        self.dof_names = self.robot_config['dof_names']
+        self.dof_signs = self.robot_config['dof_signs']
+        self.turn_on_motor_mode = self.robot_config['turn_on_motor_mode']
 
         # Set observation dimensions based on policy source
         if policy_source == "legged-loco":
@@ -278,8 +331,10 @@ class Go2ROS2Node(Node):
         self.actions = torch.zeros(self.NUM_ACTIONS, device= self.model_device, dtype= torch.float32)    
 
         ###################### hardware related #####################
-        self.joint_limits_high = getattr(Go2RobotCfgs, self.robot_class_name).joint_limits_high.to(self.model_device)
-        self.joint_limits_low = getattr(Go2RobotCfgs, self.robot_class_name).joint_limits_low.to(self.model_device)
+        # Use policy-specific joint and torque limits
+        self.joint_limits_high = self.robot_config['joint_limits_high'].to(self.model_device)
+        self.joint_limits_low = self.robot_config['joint_limits_low'].to(self.model_device)
+        self.torque_limits = self.robot_config['torque_limits'].to(self.model_device)
         joint_pos_mid = (self.joint_limits_high + self.joint_limits_low) / 2
         joint_pos_range = (self.joint_limits_high - self.joint_limits_low) / 2
         self.joint_pos_protect_high = joint_pos_mid + joint_pos_range * self.dof_pos_protect_ratio
@@ -619,14 +674,10 @@ class Go2ROS2Node(Node):
         Returns:
             clipped_action: Actions clipped to joint limits
         """
-        # Get joint limits from robot configuration
-        joint_limits_high = getattr(Go2RobotCfgs, self.robot_class_name).joint_limits_high.to(self.model_device)
-        joint_limits_low = getattr(Go2RobotCfgs, self.robot_class_name).joint_limits_low.to(self.model_device)
-        
-        # Clip actions to joint limits
+        # Use instance joint limits (policy-specific)
         clipped_action = torch.clamp(robot_coordinates_action, 
-                                   joint_limits_low.unsqueeze(0), 
-                                   joint_limits_high.unsqueeze(0))
+                                   self.joint_limits_low.unsqueeze(0), 
+                                   self.joint_limits_high.unsqueeze(0))
         
         return clipped_action
     
@@ -642,9 +693,6 @@ class Go2ROS2Node(Node):
         Returns:
             clipped_action: Actions clipped to torque limits
         """
-        # Get torque limits from robot configuration
-        torque_limits = getattr(Go2RobotCfgs, self.robot_class_name).torque_limits.to(self.model_device)
-        
         # Convert torque limits to position limits using PD control formula
         # tau = kp * (target - current) - kd * vel
         # For |tau| <= torque_limit:
@@ -653,7 +701,7 @@ class Go2ROS2Node(Node):
         
         kp = self.p_gains.unsqueeze(0)  # (1, NUM_DOF)
         kd = self.d_gains.unsqueeze(0)  # (1, NUM_DOF)
-        torque_limit = torque_limits.unsqueeze(0)  # (1, NUM_DOF)
+        torque_limit = self.torque_limits.unsqueeze(0)  # (1, NUM_DOF)
         
         # Calculate position limits based on torque constraints
         target_min = current_joint_pos + (-torque_limit + kd * current_joint_vel) / kp
