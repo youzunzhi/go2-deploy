@@ -212,7 +212,7 @@ class Go2VelocityController(Node):
                 result = response.json()
                 if result.get('success', False):
                     self.stats['successful_inferences'] += 1
-                    logger.info(f"✅ Velocity command received in {inference_time:.2f}s")
+                    # logger.info(f"✅ Velocity command received in {inference_time:.2f}s")
                     return result
                 else:
                     logger.error(f"❌ Server error: {result.get('message', 'Unknown error')}")
@@ -247,19 +247,19 @@ class Go2VelocityController(Node):
         self.last_velocity_time = time.time()
         
         # Print velocity command for debugging and integration
-        print("=" * 60)
-        print(f"🎯 VELOCITY COMMAND FROM NAVILA VLM:")
-        print(f"   Linear X:  {linear_x:.4f} m/s")
-        print(f"   Angular Z: {angular_z:.4f} rad/s")
-        print(f"   Duration:  {duration:.2f} seconds")
-        print(f"   Action:    {action_type}")
-        print(f"   From Queue: {velocity_result.get('from_queue', False)}")
-        print(f"   Queue Remaining: {velocity_result.get('queue_remaining', 0)}")
-        print(f"   Episode Step: {velocity_result.get('episode_step', 0)}")
-        print(f"   Inference Time: {velocity_result.get('inference_time', 0):.3f}s")
+        # print("=" * 60)
+        # print(f"🎯 VELOCITY COMMAND FROM NAVILA VLM:")
+        # print(f"   Linear X:  {linear_x:.4f} m/s")
+        # print(f"   Angular Z: {angular_z:.4f} rad/s")
+        # print(f"   Duration:  {duration:.2f} seconds")
+        # print(f"   Action:    {action_type}")
+        # print(f"   From Queue: {velocity_result.get('from_queue', False)}")
+        # print(f"   Queue Remaining: {velocity_result.get('queue_remaining', 0)}")
+        # print(f"   Episode Step: {velocity_result.get('episode_step', 0)}")
+        # print(f"   Inference Time: {velocity_result.get('inference_time', 0):.3f}s")
         if 'raw_output' in velocity_result:
             print(f"   VLM Output: '{velocity_result['raw_output']}'")
-        print("=" * 60)
+        # print("=" * 60)
         
         # Publish velocity command as ROS message for other nodes
         velocity_msg = String()
@@ -286,7 +286,7 @@ class Go2VelocityController(Node):
         })
         self.status_pub.publish(status_msg)
         
-        logger.info(f"📤 Velocity command published: linear_x={linear_x:.3f}, angular_z={angular_z:.3f}")
+        # logger.info(f"📤 Velocity command published: linear_x={linear_x:.3f}, angular_z={angular_z:.3f}")
     
     def control_loop(self):
         """Main control loop - called by ROS timer"""
@@ -312,7 +312,8 @@ class Go2VelocityController(Node):
             # Save the captured image to a file
             timestamp = time.strftime("%Y%m%d_%H%M%S")
             milliseconds = int((time.time() - int(time.time())) * 1000)
-            image_filename = f"img_{timestamp}_{milliseconds:03d}.jpg"
+            # image_filename = f"img_{timestamp}_{milliseconds:03d}.jpg"
+            image_filename = f"output_img.jpg"
             image_path = os.path.join(self.image_log_dir, image_filename)
             try:
                 cv2.imwrite(image_path, cv_image)
