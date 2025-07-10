@@ -188,18 +188,40 @@ def load_configuration(logdir):
     else:
         raise FileNotFoundError(f"Configuration file not found in {logdir}. ")
     
-    # Extract normalization parameters with fallbacks for missing clip_actions
-    normalization = full_config.get("normalization", {})
-    config_dict = {
-        "normalization": {
-            "clip_observations": normalization.get("clip_observations", 100.0),
-            "clip_actions": normalization.get("clip_actions", 100.0),  # Default fallback
-            "obs_scales": {
-                "ang_vel": normalization.get("obs_scales", {}).get("ang_vel", 0.25),
-                "dof_pos": normalization.get("obs_scales", {}).get("dof_pos", 1.0),
-                "dof_vel": normalization.get("obs_scales", {}).get("dof_vel", 0.05)
+    # Extract normalization parameters based on policy source
+    if policy_source == "EPO":
+        # EPO uses observation scaling from config.json
+        normalization = full_config.get("normalization", {})
+        config_dict = {
+            "normalization": {
+                "clip_observations": normalization.get("clip_observations", 100.0),
+                "clip_actions": normalization.get("clip_actions", 100.0),
+                "obs_scales": {
+                    "ang_vel": normalization.get("obs_scales", {}).get("ang_vel", 0.25),
+                    "dof_pos": normalization.get("obs_scales", {}).get("dof_pos", 1.0),
+                    "dof_vel": normalization.get("obs_scales", {}).get("dof_vel", 0.05)
+                }
             }
-        },
+        }
+    elif policy_source == "legged-loco":
+        # legged-loco does NOT use observation scaling (confirmed from training code)
+        # All scale values are null in env.yaml and empirical_normalization: false
+        config_dict = {
+            "normalization": {
+                "clip_observations": 100.0,  # Default fallback
+                "clip_actions": 100.0,  # Default fallback, legged-loco doesn't have this
+                "obs_scales": {
+                    "ang_vel": 1.0,  # No scaling in legged-loco training
+                    "dof_pos": 1.0,  # No scaling in legged-loco training
+                    "dof_vel": 1.0   # No scaling in legged-loco training
+                }
+            }
+        }
+    else:
+        raise ValueError(f"Unknown policy source: {policy_source}")
+    
+    # Common configuration extraction
+    config_dict.update({
         "control": {
             "control_type": full_config.get("control", {}).get("control_type", "P"),
             "stiffness": full_config.get("control", {}).get("stiffness", {}),
@@ -209,7 +231,7 @@ def load_configuration(logdir):
         "init_state": {
             "default_joint_angles": full_config.get("init_state", {}).get("default_joint_angles", {})
         }
-    }
+    })
     
     # Set control cycle (fixed at 20ms, different from training)
     duration = 0.02
