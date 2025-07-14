@@ -16,6 +16,7 @@ from torch.autograd import Variable
 from torch import nn
 import torch.jit
 import yaml
+import re
 
 from rsl_rl import modules
 from rsl_rl.modules import StateHistoryEncoder, RecurrentDepthBackbone, DepthOnlyFCBackbone58x87
@@ -181,6 +182,22 @@ def load_and_parse_configuration(logdir):
 
     # Extract the necessary parameters for Go2ROS2Node
     if policy_source == "EPO":
+        # EPO/default uses identity mapping (simulation order already matches hardware)
+        joint_map = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+        joint_names = [
+            "FR_hip_joint",     # 0
+            "FR_thigh_joint",   # 1
+            "FR_calf_joint",    # 2
+            "FL_hip_joint",     # 3
+            "FL_thigh_joint",   # 4
+            "FL_calf_joint",    # 5
+            "RR_hip_joint",     # 6
+            "RR_thigh_joint",   # 7
+            "RR_calf_joint",    # 8
+            "RL_hip_joint",     # 9
+            "RL_thigh_joint",   # 10
+            "RL_calf_joint",    # 11
+        ]
         # EPO uses observation scaling from config.json
         config_path = osp.join(logdir, "config.json")
         with open(config_path, "r") as f:
@@ -199,11 +216,33 @@ def load_and_parse_configuration(logdir):
             "stiffness": full_config.get("control", {}).get("stiffness", {}).get("joint", 40.),
             "damping": full_config.get("control", {}).get("damping", {}).get("joint", 1.),
             "action_scale": full_config.get("control", {}).get("action_scale", 0.25),
-            "default_joint_angles": full_config.get("init_state", {}).get("default_joint_angles", {}),
             "policy_source": policy_source
         }
+        default_joint_pos_dict = full_config.get("init_state", {}).get("default_joint_angles", {})
         
     elif policy_source == "legged-loco":
+        # Hardware order: FR_hip(0), FR_thigh(1), FR_calf(2), FL_hip(3), FL_thigh(4), FL_calf(5), RR_hip(6), RR_thigh(7), RR_calf(8), RL_hip(9), RL_thigh(10), RL_calf(11)
+        # legged-loco uses grouped joint order: [all hips, all thighs, all calves]
+        # isaaclab sim: FL_hip(0), FR_hip(1), RL_hip(2), RR_hip(3), FL_thigh(4), FR_thigh(5), RL_thigh(6), RR_thigh(7), FL_calf(8), FR_calf(9), RL_calf(10), RR_calf(11)
+        joint_map = [
+            3, 0, 9, 6,   # Hip joints: FL->3, FR->0, RL->9, RR->6  
+            4, 1, 10, 7,  # Thigh joints: FL->4, FR->1, RL->10, RR->7
+            5, 2, 11, 8   # Calf joints: FL->5, FR->2, RL->11, RR->8
+        ]
+        joint_names = [
+            "FL_hip_joint",     # 0
+            "FR_hip_joint",     # 1  
+            "RL_hip_joint",     # 2
+            "RR_hip_joint",     # 3
+            "FL_thigh_joint",   # 4
+            "FR_thigh_joint",   # 5
+            "RL_thigh_joint",   # 6
+            "RR_thigh_joint",   # 7
+            "FL_calf_joint",    # 8
+            "FR_calf_joint",    # 9
+            "RL_calf_joint",    # 10
+            "RR_calf_joint",    # 11
+        ]
         config_path = osp.join(logdir, "params/env.yaml")
         with open(config_path, "r") as f:
             full_config = yaml.safe_load(f)
@@ -214,24 +253,8 @@ def load_and_parse_configuration(logdir):
         init_state_config = full_config.get("scene", {}).get("robot", {}).get("init_state", {})
         
         # Extract joint positions from legged-loco config
-        joint_pos = init_state_config.get("joint_pos", {})
+        default_joint_pos_dict = init_state_config.get("joint_pos", {})
         
-        # If joint_pos is empty, use EPO's default joint angles (identical values)
-        if not joint_pos:
-            joint_pos = {
-                "FL_hip_joint": 0.1,
-                "RL_hip_joint": 0.1,
-                "FR_hip_joint": -0.1,
-                "RR_hip_joint": -0.1,
-                "FL_thigh_joint": 0.8,
-                "RL_thigh_joint": 1.0,
-                "FR_thigh_joint": 0.8,
-                "RR_thigh_joint": 1.0,
-                "FL_calf_joint": -1.5,
-                "RL_calf_joint": -1.5,
-                "FR_calf_joint": -1.5,
-                "RR_calf_joint": -1.5
-            }
         
         # legged-loco does NOT use observation scaling (confirmed from training code)
         config_params = {
@@ -246,7 +269,6 @@ def load_and_parse_configuration(logdir):
             "stiffness": actuator_config.get("stiffness", 40.0),  # Default from legged-loco
             "damping": actuator_config.get("damping", 1.0),      # Default from legged-loco
             "action_scale": action_config.get("scale", 0.25),    # Default from legged-loco
-            "default_joint_angles": joint_pos,
             "policy_source": policy_source
         }
     else:
@@ -254,8 +276,67 @@ def load_and_parse_configuration(logdir):
     
     # Set control cycle (fixed at 20ms, different from training)
     duration = 0.02
+
+    config_params['joint_map'] = joint_map
+    config_params['default_joint_pos'] = parse_default_joint_pos(default_joint_pos_dict, joint_names)
     
     return config_params, duration
+
+
+def parse_default_joint_pos(default_joint_pos_dict, joint_names):
+    """
+    Parse default joint positions from the dictionary (name: value) to list of values in simulation order
+
+    Args:
+        default_joint_pos_dict: Dictionary of default joint positions (name or regex pattern: value)
+        joint_names: List of joint names in simulation order
+        
+    Returns:
+        default_joint_pos: List of default joint positions in simulation order
+    """
+    # Check if this is a regex pattern dictionary (legged-loco) or direct names (EPO)
+    # If any key contains regex special characters, treat as regex patterns
+    has_regex_patterns = any(
+        any(char in key for char in ['.*', '[', ']', '(', ')', '+', '*', '?', '^', '$'])
+        for key in default_joint_pos_dict.keys()
+    )
+    
+    if has_regex_patterns:
+        # Expand regex patterns to actual joint names
+        expanded_dict = expand_regex_joint_positions(default_joint_pos_dict, joint_names)
+        default_joint_pos_dict = expanded_dict
+    
+    # Convert to list in simulation order
+    default_joint_pos = []
+    for i in range(len(joint_names)):
+        if joint_names[i] in default_joint_pos_dict:
+            default_joint_pos.append(default_joint_pos_dict[joint_names[i]])
+        else:
+            raise KeyError(f"Joint '{joint_names[i]}' not found in default joint positions")
+    
+    return default_joint_pos
+
+
+def expand_regex_joint_positions(regex_joint_pos_dict, joint_names):
+    """
+    Expand regex patterns in legged-loco joint positions to actual joint names
+    
+    Args:
+        regex_joint_pos_dict: Dictionary with regex patterns as keys and joint positions as values
+        joint_names: List of actual joint names to match against
+        
+    Returns:
+        expanded_dict: Dictionary with actual joint names as keys and positions as values
+    """
+    expanded_dict = {}
+    
+    for pattern, value in regex_joint_pos_dict.items():
+        # Find all joint names that match this pattern
+        for joint_name in joint_names:
+            if re.fullmatch(pattern, joint_name):
+                expanded_dict[joint_name] = value
+    
+    return expanded_dict
 
 
 def load_base_model(logdir, device):
@@ -621,7 +702,8 @@ def main(args):
 
     # 2. Create ROS node with configuration parameters
     env_node = Go2ROS2Node(
-        "go2",
+        joint_map=config_params['joint_map'],
+        default_joint_pos=config_params['default_joint_pos'],
         model_device=device,
         dryrun=not args.nodryrun,
         mode=args.mode,

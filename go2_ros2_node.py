@@ -71,31 +71,7 @@ class Go2RobotCfgs:
             'turn_on_motor_mode': [0x01] * 12,
         }
         
-        if policy_source == "legged-loco":
-            # legged-loco uses grouped joint order: [all hips, all thighs, all calves]
-            # Simulation order: FL_hip, FR_hip, RL_hip, RR_hip, FL_thigh, FR_thigh, RL_thigh, RR_thigh, FL_calf, FR_calf, RL_calf, RR_calf
-            config['dof_names'] = [
-                "FL_hip_joint",     # 0
-                "FR_hip_joint",     # 1  
-                "RL_hip_joint",     # 2
-                "RR_hip_joint",     # 3
-                "FL_thigh_joint",   # 4
-                "FR_thigh_joint",   # 5
-                "RL_thigh_joint",   # 6
-                "RR_thigh_joint",   # 7
-                "FL_calf_joint",    # 8
-                "FR_calf_joint",    # 9
-                "RL_calf_joint",    # 10
-                "RR_calf_joint",    # 11
-            ]
-            # Mapping from legged-loco simulation order to hardware order
-            # Hardware order: FR_hip(0), FR_thigh(1), FR_calf(2), FL_hip(3), FL_thigh(4), FL_calf(5), RR_hip(6), RR_thigh(7), RR_calf(8), RL_hip(9), RL_thigh(10), RL_calf(11)
-            # legged-loco sim: FL_hip(0), FR_hip(1), RL_hip(2), RR_hip(3), FL_thigh(4), FR_thigh(5), RL_thigh(6), RR_thigh(7), FL_calf(8), FR_calf(9), RL_calf(10), RR_calf(11)
-            config['dof_map'] = [
-                3, 0, 9, 6,   # Hip joints: FL->3, FR->0, RL->9, RR->6  
-                4, 1, 10, 7,  # Thigh joints: FL->4, FR->1, RL->10, RR->7
-                5, 2, 11, 8   # Calf joints: FL->5, FR->2, RL->11, RR->8
-            ]
+        if policy_source == "legged-loco":    
             # Joint limits in legged-loco simulation order
             config['joint_limits_high'] = torch.tensor([
                 1.0472, 1.0472, 1.0472, 1.0472,    # Hip joints: FL, FR, RL, RR
@@ -113,24 +89,6 @@ class Go2RobotCfgs:
                 40, 40, 40, 40   # Calf joints: FL, FR, RL, RR
             ], device="cpu", dtype=torch.float32)
         else:
-            # EPO/default uses leg-grouped joint order: [FR leg, FL leg, RR leg, RL leg]
-            # Simulation order matches hardware order (reindexed in simulation)
-            config['dof_names'] = [
-                "FR_hip_joint",     # 0
-                "FR_thigh_joint",   # 1
-                "FR_calf_joint",    # 2
-                "FL_hip_joint",     # 3
-                "FL_thigh_joint",   # 4
-                "FL_calf_joint",    # 5
-                "RR_hip_joint",     # 6
-                "RR_thigh_joint",   # 7
-                "RR_calf_joint",    # 8
-                "RL_hip_joint",     # 9
-                "RL_thigh_joint",   # 10
-                "RL_calf_joint",    # 11
-            ]
-            # Identity mapping (simulation order already matches hardware)
-            config['dof_map'] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
             # Joint limits in EPO simulation order (leg-grouped)
             config['joint_limits_high'] = torch.tensor([
                 1.0472, 3.4907, -0.83776,    # FR leg
@@ -176,7 +134,8 @@ class Go2ROS2Node(Node):
         left =          0b1000000000000000 # 32768
 
     def __init__(self,
-            robot_namespace= None,
+            joint_map,
+            default_joint_pos,
             low_state_topic= "/lowstate",
             low_cmd_topic= "/lowcmd",
             joy_stick_topic= "/wirelesscontroller",
@@ -189,7 +148,6 @@ class Go2ROS2Node(Node):
             kp=40.,
             kd=1.,
             action_scale= None,
-            default_joint_angles= None,
             lin_vel_deadband= 0.1,
             ang_vel_deadband= 0.1,
             cmd_px_range= [0.4, 1.0], # check joy_stick_callback (p for positive, n for negative)
@@ -207,7 +165,7 @@ class Go2ROS2Node(Node):
             policy_source= "EPO", # Policy source: "EPO" or "legged-loco"
         ):
         super().__init__("unitree_ros2_real")
-        self.robot_namespace = robot_namespace
+        self.joint_map = joint_map
         self.low_state_topic = low_state_topic
         self.low_cmd_topic = low_cmd_topic if not dryrun else low_cmd_topic + "_dryrun_" + str(np.random.randint(0, 65535))
         self.joy_stick_topic = joy_stick_topic
@@ -221,7 +179,7 @@ class Go2ROS2Node(Node):
         self.kp = kp
         self.kd = kd
         self.action_scale = action_scale
-        self.default_joint_angles = default_joint_angles
+        self.default_joint_pos = torch.tensor(default_joint_pos, device=model_device, dtype=torch.float32)
         
         self.lin_vel_deadband = lin_vel_deadband
         self.ang_vel_deadband = ang_vel_deadband
@@ -243,7 +201,6 @@ class Go2ROS2Node(Node):
         self.robot_config = Go2RobotCfgs.get_config_for_policy_source(policy_source)
         self.NUM_DOF = self.robot_config['NUM_DOF']
         self.NUM_ACTIONS = self.robot_config['NUM_ACTIONS']
-        self.dof_map = self.robot_config['dof_map']
         self.dof_names = self.robot_config['dof_names']
         self.dof_signs = self.robot_config['dof_signs']
         self.turn_on_motor_mode = self.robot_config['turn_on_motor_mode']
@@ -310,14 +267,8 @@ class Go2ROS2Node(Node):
     def setup_control_gains_and_buffers(self):
         """ Setup default positions, and buffers from the config parameters """
 
-        self.default_joint_angles = torch.zeros(self.NUM_DOF, device= self.model_device, dtype= torch.float32)
         self.dof_pos_ = torch.empty(1, self.NUM_DOF, device= self.model_device, dtype= torch.float32)
         self.dof_vel_ = torch.empty(1, self.NUM_DOF, device= self.model_device, dtype= torch.float32)
-        
-        for i in range(self.NUM_DOF):
-            name = self.dof_names[i]
-            default_joint_angle = self.default_joint_angles[name]
-            self.default_joint_angles[i] = default_joint_angle
 
         # actions
         self.num_actions = self.NUM_ACTIONS
@@ -408,10 +359,10 @@ class Go2ROS2Node(Node):
 
         ################### refresh dof_pos and dof_vel ######################
         for sim_idx in range(self.NUM_DOF):
-            real_idx = self.dof_map[sim_idx]
+            real_idx = self.joint_map[sim_idx]
             self.dof_pos_[0, sim_idx] = self.low_state_buffer.motor_state[real_idx].q * self.dof_signs[sim_idx]
         for sim_idx in range(self.NUM_DOF):
-            real_idx = self.dof_map[sim_idx]
+            real_idx = self.joint_map[sim_idx]
             self.dof_vel_[0, sim_idx] = self.low_state_buffer.motor_state[real_idx].dq * self.dof_signs[sim_idx]
 
     def _joy_stick_callback(self, msg):
@@ -568,7 +519,7 @@ class Go2ROS2Node(Node):
             return torch.tensor([[0., 0., 0.]], device=self.model_device)
 
     def _get_dof_pos_obs(self):
-        return (self.dof_pos_ - self.default_joint_angles.unsqueeze(0)) * self.obs_scales["dof_pos"]
+        return (self.dof_pos_ - self.default_joint_pos.unsqueeze(0)) * self.obs_scales["dof_pos"]
 
     def _get_dof_vel_obs(self):
         return self.dof_vel_ * self.obs_scales["dof_vel"]
@@ -727,7 +678,7 @@ class Go2ROS2Node(Node):
             # legged-loco (no clipping)
             clipped_scaled_action = actions * self.action_scale
 
-        robot_coordinates_action = clipped_scaled_action + self.default_joint_angles.unsqueeze(0)
+        robot_coordinates_action = clipped_scaled_action + self.default_joint_pos.unsqueeze(0)
         
         # Apply safety clipping using joint limits
         robot_coordinates_action = self.clip_actions_by_joint_limits(robot_coordinates_action)
@@ -737,7 +688,7 @@ class Go2ROS2Node(Node):
         current_joint_vel = self.dof_vel_
         robot_coordinates_action = self.clip_actions_by_torque_limits(robot_coordinates_action, current_joint_pos, current_joint_vel)
         
-        self._publish_legs_cmd(robot_coordinates_action[0], stand=False)
+        self._publish_legs_cmd(robot_coordinates_action[0])
 
     def send_stand_action(self, actions):
         """ Send the action to the robot motors, which does the preprocessing
@@ -747,7 +698,7 @@ class Go2ROS2Node(Node):
         actions = torch.tensor(actions, device=self.model_device).unsqueeze(0)
         self.actions = actions
 
-        self._publish_legs_cmd(actions[0], stand=True)
+        self._publish_legs_cmd(actions[0])
 
     def get_stand_action(self):
         if self.firstRun:
@@ -776,16 +727,16 @@ class Go2ROS2Node(Node):
         return self.stand_action
 
     """ functions that actually publish the commands and take effect """
-    def _publish_legs_cmd(self, robot_coordinates_action, stand):
-        """ Publish the joint commands to the robot legs in robot coordinates system.
-        robot_coordinates_action: shape (NUM_DOF,), in simulation order.
+    def _publish_legs_cmd(self, q_cmd_sim_order):
+        """ Publish the joint commands to the robot legs in simulation order.
+        q_cmd_sim_order: shape (NUM_DOF,), in simulation order.
         """
         #################### check ##############################
         for sim_idx in range(self.NUM_DOF):
-            real_idx = self.dof_map[sim_idx]
+            real_idx = self.joint_map[sim_idx]
             if not self.dryrun:
                 self.low_cmd_buffer.motor_cmd[real_idx].mode = self.turn_on_motor_mode[sim_idx]
-            self.low_cmd_buffer.motor_cmd[real_idx].q = robot_coordinates_action[sim_idx].item() * self.dof_signs[sim_idx]
+            self.low_cmd_buffer.motor_cmd[real_idx].q = q_cmd_sim_order[sim_idx].item() * self.dof_signs[sim_idx]
             self.low_cmd_buffer.motor_cmd[real_idx].dq = 0.
             self.low_cmd_buffer.motor_cmd[real_idx].tau = 0.
             self.low_cmd_buffer.motor_cmd[real_idx].kp = self.kp
@@ -797,7 +748,7 @@ class Go2ROS2Node(Node):
     def _turn_off_motors(self):
         """ Turn off the motors """
         for sim_idx in range(self.NUM_DOF):
-            real_idx = self.dof_map[sim_idx]
+            real_idx = self.joint_map[sim_idx]
             self.low_cmd_buffer.motor_cmd[real_idx].mode = 0x00
             self.low_cmd_buffer.motor_cmd[real_idx].q = 0.
             self.low_cmd_buffer.motor_cmd[real_idx].dq = 0.
