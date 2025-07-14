@@ -164,72 +164,51 @@ def handle_timing_mode(env_node, timing_mode, duration):
         raise ValueError(f"Invalid timing mode: {timing_mode}")
 
 
-def load_configuration(logdir):
+def load_and_parse_configuration(logdir):
     """
-    Load only necessary configuration parameters for deployment
+    Load configuration parameters from files and extract them for Go2ROS2Node initialization
     
     Args:
         logdir: Directory path containing the configuration file
         
     Returns:
-        config_dict: Filtered configuration dictionary with only used parameters
+        config_params: Dictionary with parameter names as keys for Go2ROS2Node constructor
         duration: Control cycle duration
     """
     assert logdir is not None, "Please provide a logdir"
     
     policy_source = determine_policy_source(logdir)
 
-    # Extract only the necessary parameters that are actually used
+    # Extract the necessary parameters for Go2ROS2Node
     if policy_source == "EPO":
         # EPO uses observation scaling from config.json
         config_path = osp.join(logdir, "config.json")
         with open(config_path, "r") as f:
             full_config = json.load(f, object_pairs_hook=OrderedDict)
-        config_dict = {
-            "normalization": {
-                "clip_observations": full_config["normalization"]["clip_observations"],
-                "clip_actions": full_config["normalization"]["clip_actions"],
-                "obs_scales": {
-                    "ang_vel": full_config["normalization"]["obs_scales"]["ang_vel"],
-                    "dof_pos": full_config["normalization"]["obs_scales"]["dof_pos"],
-                    "dof_vel": full_config["normalization"]["obs_scales"]["dof_vel"]
-                }
-            }
-        }
         
-        # EPO stores control parameters under "control" key
-        control_config = full_config.get("control", {})
-        config_dict.update({
-            "control": {
-                "control_type": control_config.get("control_type", "P"),
-                "stiffness": control_config.get("stiffness", {}),
-                "damping": control_config.get("damping", {}),
-                "action_scale": control_config.get("action_scale", 0.25),
+        # Extract configuration parameters directly
+        config_params = {
+            "clip_observations": full_config["normalization"]["clip_observations"],
+            "clip_actions": full_config["normalization"]["clip_actions"],
+            "obs_scales": {
+                "ang_vel": full_config["normalization"]["obs_scales"]["ang_vel"],
+                "dof_pos": full_config["normalization"]["obs_scales"]["dof_pos"],
+                "dof_vel": full_config["normalization"]["obs_scales"]["dof_vel"]
             },
-            "init_state": {
-                "default_joint_angles": full_config.get("init_state", {}).get("default_joint_angles", {})
-            }
-        })
+            "control_type": full_config.get("control", {}).get("control_type", "P"),
+            "stiffness": full_config.get("control", {}).get("stiffness", {}).get("joint", 40.),
+            "damping": full_config.get("control", {}).get("damping", {}).get("joint", 1.),
+            "action_scale": full_config.get("control", {}).get("action_scale", 0.25),
+            "default_joint_angles": full_config.get("init_state", {}).get("default_joint_angles", {}),
+            "policy_source": policy_source
+        }
         
     elif policy_source == "legged-loco":
         config_path = osp.join(logdir, "params/env.yaml")
         with open(config_path, "r") as f:
             full_config = yaml.safe_load(f)
-        # legged-loco does NOT use observation scaling (confirmed from training code)
-        # All scale values are null in env.yaml and empirical_normalization: false
-        config_dict = {
-            "normalization": {
-                "clip_observations": 100.0,  # Default fallback
-                "clip_actions": 100.0,  # Default fallback, legged-loco doesn't have this
-                "obs_scales": {
-                    "ang_vel": 1.0,  # No scaling in legged-loco training
-                    "dof_pos": 1.0,  # No scaling in legged-loco training
-                    "dof_vel": 1.0   # No scaling in legged-loco training
-                }
-            }
-        }
         
-        # legged-loco stores control parameters in scene.robot.actuators.base_legs
+        # legged-loco stores control parameters in different locations
         actuator_config = full_config.get("scene", {}).get("robot", {}).get("actuators", {}).get("base_legs", {})
         action_config = full_config.get("actions", {}).get("joint_pos", {})
         init_state_config = full_config.get("scene", {}).get("robot", {}).get("init_state", {})
@@ -254,24 +233,29 @@ def load_configuration(logdir):
                 "RR_calf_joint": -1.5
             }
         
-        config_dict.update({
-            "control": {
-                "control_type": "P",  # Default for legged-loco
-                "stiffness": actuator_config.get("stiffness", 40.0),  # Default from legged-loco
-                "damping": actuator_config.get("damping", 1.0),      # Default from legged-loco
-                "action_scale": action_config.get("scale", 0.25),    # Default from legged-loco
+        # legged-loco does NOT use observation scaling (confirmed from training code)
+        config_params = {
+            "clip_observations": 100.0,  # Default fallback
+            "clip_actions": None,  # legged-loco doesn't have action clipping
+            "obs_scales": {
+                "ang_vel": 1.0,  # No scaling in legged-loco training
+                "dof_pos": 1.0,  # No scaling in legged-loco training
+                "dof_vel": 1.0   # No scaling in legged-loco training
             },
-            "init_state": {
-                "default_joint_angles": joint_pos
-            }
-        })
+            "control_type": "P",  # Default for legged-loco
+            "stiffness": actuator_config.get("stiffness", 40.0),  # Default from legged-loco
+            "damping": actuator_config.get("damping", 1.0),      # Default from legged-loco
+            "action_scale": action_config.get("scale", 0.25),    # Default from legged-loco
+            "default_joint_angles": joint_pos,
+            "policy_source": policy_source
+        }
     else:
         raise ValueError(f"Unknown policy source: {policy_source}")
     
     # Set control cycle (fixed at 20ms, different from training)
     duration = 0.02
     
-    return config_dict, duration
+    return config_params, duration
 
 
 def load_base_model(logdir, device):
@@ -631,17 +615,17 @@ def create_legged_loco_policy_function(policy):
 def main(args):
     rclpy.init()
 
-    # 1. Load configuration
-    config_dict, duration = load_configuration(args.logdir)
+    # 1. Load and parse configuration
+    config_params, duration = load_and_parse_configuration(args.logdir)
     device = "cuda"
 
-    # 2. Create ROS node
+    # 2. Create ROS node with configuration parameters
     env_node = Go2ROS2Node(
         "go2",
-        cfg=config_dict,
         model_device=device,
         dryrun=not args.nodryrun,
         mode=args.mode,
+        **config_params  # Pass all config parameters directly
     )
 
     # 3. Print configuration information
