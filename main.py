@@ -176,7 +176,6 @@ def load_and_parse_configuration(logdir):
         config_params: Dictionary with parameter names as keys for Go2ROS2Node constructor
         duration: Control cycle duration
     """
-    assert logdir is not None, "Please provide a logdir"
     
     policy_source = determine_policy_source(logdir)
 

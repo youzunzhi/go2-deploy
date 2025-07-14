@@ -220,7 +220,20 @@ class Go2ROS2Node(Node):
         self.contact_filt = torch.ones((1, 4), device=self.model_device, dtype=torch.float32)
         self.last_contact_filt = torch.ones((1, 4), device=self.model_device, dtype=torch.float32)
 
-        self.setup_control_gains_and_buffers()
+        self.dof_pos_ = torch.empty(1, self.NUM_DOF, device=self.model_device, dtype=torch.float32)
+        self.dof_vel_ = torch.empty(1, self.NUM_DOF, device=self.model_device, dtype=torch.float32)
+        self.actions = torch.zeros(self.NUM_ACTIONS, device=self.model_device, dtype=torch.float32)    
+
+        ###################### hardware related #####################
+        # Use policy-specific joint and torque limits
+        self.joint_limits_high = self.robot_config['joint_limits_high'].to(self.model_device)
+        self.joint_limits_low = self.robot_config['joint_limits_low'].to(self.model_device)
+        self.torque_limits = self.robot_config['torque_limits'].to(self.model_device)
+        joint_pos_mid = (self.joint_limits_high + self.joint_limits_low) / 2
+        joint_pos_range = (self.joint_limits_high - self.joint_limits_low) / 2
+        self.joint_pos_protect_high = joint_pos_mid + joint_pos_range * self.dof_pos_protect_ratio
+        self.joint_pos_protect_low = joint_pos_mid - joint_pos_range * self.dof_pos_protect_ratio
+        
         self.init_stand_config()
         
         self.global_counter = 0
@@ -261,29 +274,7 @@ class Go2ROS2Node(Node):
         self.forward_depth_latent_yaw_buffer = torch.zeros(1, self.n_depth_latent+2, device=self.model_device, dtype=torch.float)
         self.xyyaw_command = torch.tensor([[0, 0, 0]], device=self.model_device, dtype=torch.float32)
         self.contact_filt = torch.ones((1, 4), device=self.model_device, dtype=torch.float32)
-        self.last_contact_filt = torch.ones((1, 4), device=self.model_device, dtype=torch.float32)
-
-
-    def setup_control_gains_and_buffers(self):
-        """ Setup default positions, and buffers from the config parameters """
-        self.dof_pos_ = torch.empty(1, self.NUM_DOF, device=self.model_device, dtype=torch.float32)
-        self.dof_vel_ = torch.empty(1, self.NUM_DOF, device=self.model_device, dtype=torch.float32)
-
-        # actions
-        self.num_actions = self.NUM_ACTIONS
-        self.get_logger().info("[Env] action scale: {:.2f}".format(self.action_scale))
-        
-        self.actions = torch.zeros(self.NUM_ACTIONS, device=self.model_device, dtype=torch.float32)    
-
-        ###################### hardware related #####################
-        # Use policy-specific joint and torque limits
-        self.joint_limits_high = self.robot_config['joint_limits_high'].to(self.model_device)
-        self.joint_limits_low = self.robot_config['joint_limits_low'].to(self.model_device)
-        self.torque_limits = self.robot_config['torque_limits'].to(self.model_device)
-        joint_pos_mid = (self.joint_limits_high + self.joint_limits_low) / 2
-        joint_pos_range = (self.joint_limits_high - self.joint_limits_low) / 2
-        self.joint_pos_protect_high = joint_pos_mid + joint_pos_range * self.dof_pos_protect_ratio
-        self.joint_pos_protect_low = joint_pos_mid - joint_pos_range * self.dof_pos_protect_ratio
+        self.last_contact_filt = torch.ones((1, 4), device=self.model_device, dtype=torch.float32)    
 
     def start_ros_handlers(self):
         """ after initializing the env and policy, register ros related callbacks and topics
