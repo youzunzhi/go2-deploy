@@ -296,21 +296,41 @@ class Go2ROS2Node(Node):
         self.clip_obs = self.cfg["normalization"]["clip_observations"]
         
         self.p_gains = []
-        for i in range(self.NUM_DOF):
-            name = self.dof_names[i]
-            for k, v in self.cfg["control"]["stiffness"].items():
-                if k in name:
-                    self.p_gains.append(v)
-                    break 
+        stiffness_config = self.cfg["control"]["stiffness"]
+        
+        # Handle both dictionary and scalar stiffness values
+        if isinstance(stiffness_config, dict):
+            # EPO-style configuration with per-joint stiffness values
+            for i in range(self.NUM_DOF):
+                name = self.dof_names[i]
+                for k, v in stiffness_config.items():
+                    if k in name:
+                        self.p_gains.append(v)
+                        break 
+        else:
+            # legged-loco style configuration with single scalar stiffness value
+            for i in range(self.NUM_DOF):
+                self.p_gains.append(float(stiffness_config))
+        
         self.p_gains = torch.tensor(self.p_gains, device= self.model_device, dtype= torch.float32)
 
         self.d_gains = []
-        for i in range(self.NUM_DOF):
-            name = self.dof_names[i] 
-            for k, v in self.cfg["control"]["damping"].items():
-                if k in name:
-                    self.d_gains.append(v)
-                    break
+        damping_config = self.cfg["control"]["damping"]
+        
+        # Handle both dictionary and scalar damping values
+        if isinstance(damping_config, dict):
+            # EPO-style configuration with per-joint damping values
+            for i in range(self.NUM_DOF):
+                name = self.dof_names[i] 
+                for k, v in damping_config.items():
+                    if k in name:
+                        self.d_gains.append(v)
+                        break
+        else:
+            # legged-loco style configuration with single scalar damping value
+            for i in range(self.NUM_DOF):
+                self.d_gains.append(float(damping_config))
+        
         self.d_gains = torch.tensor(self.d_gains, device= self.model_device, dtype= torch.float32)
 
         self.default_dof_pos = torch.zeros(self.NUM_DOF, device= self.model_device, dtype= torch.float32)
