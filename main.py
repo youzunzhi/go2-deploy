@@ -731,13 +731,13 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     
-    parser.add_argument("--logdir", type= str, default= None, help= "The directory which contains the config.json and model_*.pt files")
-    parser.add_argument("--nodryrun", action= "store_true", default= False, help= "Disable dryrun mode")
+    parser.add_argument("--logdir", type=str, default=None, help="The directory which contains the config.json and model_*.pt files")
+    parser.add_argument("--nodryrun", action="store_true", default=False, help="Disable dryrun mode")
     parser.add_argument("--timing_mode", type=str, default="ros_timer",
         choices=["manual_control", "ros_timer"],
         help="Select timing mode: manual_control (precise timing control) or ros_timer (ROS managed timer)",
     )
-    parser.add_argument("--mode", type= str, default= "locomotion", choices=["locomotion", "walk"])
+    parser.add_argument("--mode", type=str, default="locomotion", choices=["locomotion", "walk"])
     args = parser.parse_args()
     
     main(args)

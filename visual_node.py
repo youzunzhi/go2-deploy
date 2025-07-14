@@ -52,10 +52,10 @@ class VisualNode(Node):
             cfg: dict,
             cropping: list = [0, 0, 0, 0], # top, bottom, left, right
             rs_resolution: tuple = (480, 270), # width, height for the realsense camera)
-            rs_fps: int= 30,
-            depth_input_topic= "/camera/forward_depth",
-            camera_info_topic= "/camera/camera_info",
-            forward_depth_image_topic= "/forward_depth_image",
+            rs_fps: int=30,
+            depth_input_topic="/camera/forward_depth",
+            camera_info_topic="/camera/camera_info",
+            forward_depth_image_topic="/forward_depth_image",
         ):
         super().__init__("depth_image")
         self.cfg = cfg
@@ -130,7 +130,7 @@ class VisualNode(Node):
 
     def publish_camera_info_callback(self):
         self.camera_info_msg.header.stamp = self.get_clock().now().to_msg()
-        self.get_logger().info("camera info published", once= True)
+        self.get_logger().info("camera info published", once=True)
         self.camera_info_pub.publish(self.camera_info_msg)
 
     def get_depth_frame(self):
@@ -140,7 +140,7 @@ class VisualNode(Node):
         
         depth_frame = rs_frame.get_depth_frame()
         if not depth_frame:
-            self.get_logger().error("No depth frame", throttle_duration_sec= 1)
+            self.get_logger().error("No depth frame", throttle_duration_sec=1)
             return
         
         for rs_filter in self.rs_filters:
@@ -159,18 +159,18 @@ class VisualNode(Node):
         depth_image_pyt = resize2d(depth_image_pyt, self.output_resolution)
 
         # publish the depth image input to ros topic
-        self.get_logger().info("depth range: {}-{}".format(*self.depth_range), once= True)
+        self.get_logger().info("depth range: {}-{}".format(*self.depth_range), once=True)
         depth_input_data = (
             depth_image_pyt.detach().cpu().numpy() * (self.depth_range[1] - self.depth_range[0]) + self.depth_range[0]).astype(np.uint16)[0] # (h, w) unit [mm]
         # print('depth input data: ', depth_input_data.min(), depth_input_data.max())
         
         depth_image_pyt -= 0.5 # [-0.5, 0.5])
 
-        depth_input_msg = rnp.msgify(Image, depth_input_data.astype(np.float32), encoding= "32FC1")
+        depth_input_msg = rnp.msgify(Image, depth_input_data.astype(np.float32), encoding="32FC1")
         depth_input_msg.header.stamp = self.get_clock().now().to_msg()
         depth_input_msg.header.frame_id = "d435_sim_depth_link"
         self.depth_input_pub.publish(depth_input_msg)
-        self.get_logger().info("depth input published", once= True)
+        self.get_logger().info("depth input published", once=True)
 
         return depth_image_pyt
 
@@ -180,7 +180,7 @@ class VisualNode(Node):
         msg.data = depth_data.flatten().detach().cpu().numpy().tolist()
 
         self.forward_depth_image_pub.publish(msg)
-        self.get_logger().info("depth data published", once= True)
+        self.get_logger().info("depth data published", once=True)
 
     def start_main_loop_timer(self, duration):
         self.create_timer(
@@ -235,46 +235,46 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--logdir", type= str, default= None, help= "The directory which contains the config.json and model_*.pt files")
+    parser.add_argument("--logdir", type=str, default=None, help="The directory which contains the config.json and model_*.pt files")
     
     parser.add_argument("--height",
-        type= int,
-        default= 480,
-        help= "The height of the realsense image",
+        type=int,
+        default=480,
+        help="The height of the realsense image",
     )
     parser.add_argument("--width",
-        type= int,
-        default= 640,
-        help= "The width of the realsense image",
+        type=int,
+        default=640,
+        help="The width of the realsense image",
     )
     parser.add_argument("--fps",
-        type= int,
-        default= 30,
-        help= "The fps request to the rs pipeline",
+        type=int,
+        default=30,
+        help="The fps request to the rs pipeline",
     )
     parser.add_argument("--crop_left",
-        type= int,
-        default= 80, # 28
-        help= "num of pixel to crop in the original pyrealsense readings."
+        type=int,
+        default=80, # 28
+        help="num of pixel to crop in the original pyrealsense readings."
     )
     parser.add_argument("--crop_right",
-        type= int,
-        default= 36, # 36
-        help= "num of pixel to crop in the original pyrealsense readings."
+        type=int,
+        default=36, # 36
+        help="num of pixel to crop in the original pyrealsense readings."
     )
     parser.add_argument("--crop_top",
-        type= int,
-        default= 60, # 48
-        help= "num of pixel to crop in the original pyrealsense readings."
+        type=int,
+        default=60, # 48
+        help="num of pixel to crop in the original pyrealsense readings."
     )
     parser.add_argument("--crop_bottom",
-        type= int,
-        default= 100,
-        help= "num of pixel to crop in the original pyrealsense readings."
+        type=int,
+        default=100,
+        help="num of pixel to crop in the original pyrealsense readings."
     )
-    parser.add_argument("--loop_mode", type= str, default= "timer",
-        choices= ["while", "timer"],
-        help= "Select which mode to run the main policy control iteration",
+    parser.add_argument("--loop_mode", type=str, default="timer",
+        choices=["while", "timer"],
+        help="Select which mode to run the main policy control iteration",
     )
 
     args = parser.parse_args()

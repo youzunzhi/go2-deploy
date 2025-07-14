@@ -134,36 +134,36 @@ class Go2ROS2Node(Node):
         left =          0b1000000000000000 # 32768
 
     def __init__(self,
-            joint_map,
-            default_joint_pos,
-            low_state_topic= "/lowstate",
-            low_cmd_topic= "/lowcmd",
-            joy_stick_topic= "/wirelesscontroller",
-            depth_data_topic= "/forward_depth_image",
-            # Configuration parameters that need to be passed in
-            clip_obs=100,
-            clip_actions=None,
-            obs_scales=None,
-            control_type=None,
-            kp=40.,
-            kd=1.,
-            action_scale= None,
-            lin_vel_deadband= 0.1,
-            ang_vel_deadband= 0.1,
-            cmd_px_range= [0.4, 1.0], # check joy_stick_callback (p for positive, n for negative)
-            cmd_nx_range= [0.4, 0.8], # check joy_stick_callback (p for positive, n for negative)
-            cmd_py_range= [0.4, 0.8], # check joy_stick_callback (p for positive, n for negative)
-            cmd_ny_range= [0.4, 0.8], # check joy_stick_callback (p for positive, n for negative)
-            cmd_pyaw_range= [0.4, 1.6], # check joy_stick_callback (p for positive, n for negative)
-            cmd_nyaw_range= [0.4, 1.6], # check joy_stick_callback (p for positive, n for negative)
-            move_by_wireless_remote= True, # if True, the robot will be controlled by a wireless remote
-            model_device= "cpu",
-            dof_pos_protect_ratio= 1.1, # if the dof_pos is out of the range of this ratio, the process will shutdown.
-            robot_class_name= "Go2",
-            dryrun= True, # if True, the robot will not send commands to the real robot
-            mode= "locomotion",
-            policy_source= "EPO", # Policy source: "EPO" or "legged-loco"
-        ):
+        joint_map,
+        default_joint_pos,
+        low_state_topic="/lowstate",
+        low_cmd_topic="/lowcmd",
+        joy_stick_topic="/wirelesscontroller",
+        depth_data_topic="/forward_depth_image",
+        # Configuration parameters that need to be passed in
+        clip_obs=100,
+        clip_actions=None,
+        obs_scales=None,
+        control_type=None,
+        kp=40.,
+        kd=1.,
+        action_scale=None,
+        lin_vel_deadband=0.1,
+        ang_vel_deadband=0.1,
+        cmd_px_range=[0.4, 1.0], # check joy_stick_callback (p for positive, n for negative)
+        cmd_nx_range=[0.4, 0.8], # check joy_stick_callback (p for positive, n for negative)
+        cmd_py_range=[0.4, 0.8], # check joy_stick_callback (p for positive, n for negative)
+        cmd_ny_range=[0.4, 0.8], # check joy_stick_callback (p for positive, n for negative)
+        cmd_pyaw_range=[0.4, 1.6], # check joy_stick_callback (p for positive, n for negative)
+        cmd_nyaw_range=[0.4, 1.6], # check joy_stick_callback (p for positive, n for negative)
+        move_by_wireless_remote=True, # if True, the robot will be controlled by a wireless remote
+        model_device="cpu",
+        dof_pos_protect_ratio=1.1, # if the dof_pos is out of the range of this ratio, the process will shutdown.
+        robot_class_name="Go2",
+        dryrun=True, # if True, the robot will not send commands to the real robot
+        mode="locomotion",
+        policy_source="EPO", # Policy source: "EPO" or "legged-loco"
+    ):
         super().__init__("unitree_ros2_real")
         self.joint_map = joint_map
         self.low_state_topic = low_state_topic
@@ -216,9 +216,9 @@ class Go2ROS2Node(Node):
         self.proprio_history_buf = torch.zeros(1, self.n_hist_len, self.n_proprio, device=self.model_device, dtype=torch.float)
         self.episode_length_buf = torch.zeros(1, device=self.model_device, dtype=torch.float)
         self.forward_depth_latent_yaw_buffer = torch.zeros(1, self.n_depth_latent+2, device=self.model_device, dtype=torch.float)
-        self.xyyaw_command = torch.tensor([[0, 0, 0]], device= self.model_device, dtype= torch.float32)
-        self.contact_filt = torch.ones((1, 4), device= self.model_device, dtype= torch.float32)
-        self.last_contact_filt = torch.ones((1, 4), device= self.model_device, dtype= torch.float32)
+        self.xyyaw_command = torch.tensor([[0, 0, 0]], device=self.model_device, dtype=torch.float32)
+        self.contact_filt = torch.ones((1, 4), device=self.model_device, dtype=torch.float32)
+        self.last_contact_filt = torch.ones((1, 4), device=self.model_device, dtype=torch.float32)
 
         self.setup_control_gains_and_buffers()
         self.init_stand_config()
@@ -255,26 +255,25 @@ class Go2ROS2Node(Node):
         self.firstrun_target_1 = True
         self.firstRun = True
 
-        self.actions = torch.zeros(self.NUM_ACTIONS, device= self.model_device, dtype= torch.float32)    
+        self.actions = torch.zeros(self.NUM_ACTIONS, device=self.model_device, dtype=torch.float32)    
         self.proprio_history_buf = torch.zeros(1, self.n_hist_len, self.n_proprio, device=self.model_device, dtype=torch.float)
         self.episode_length_buf = torch.zeros(1, device=self.model_device, dtype=torch.float)
         self.forward_depth_latent_yaw_buffer = torch.zeros(1, self.n_depth_latent+2, device=self.model_device, dtype=torch.float)
-        self.xyyaw_command = torch.tensor([[0, 0, 0]], device= self.model_device, dtype= torch.float32)
-        self.contact_filt = torch.ones((1, 4), device= self.model_device, dtype= torch.float32)
-        self.last_contact_filt = torch.ones((1, 4), device= self.model_device, dtype= torch.float32)
+        self.xyyaw_command = torch.tensor([[0, 0, 0]], device=self.model_device, dtype=torch.float32)
+        self.contact_filt = torch.ones((1, 4), device=self.model_device, dtype=torch.float32)
+        self.last_contact_filt = torch.ones((1, 4), device=self.model_device, dtype=torch.float32)
 
 
     def setup_control_gains_and_buffers(self):
         """ Setup default positions, and buffers from the config parameters """
-
-        self.dof_pos_ = torch.empty(1, self.NUM_DOF, device= self.model_device, dtype= torch.float32)
-        self.dof_vel_ = torch.empty(1, self.NUM_DOF, device= self.model_device, dtype= torch.float32)
+        self.dof_pos_ = torch.empty(1, self.NUM_DOF, device=self.model_device, dtype=torch.float32)
+        self.dof_vel_ = torch.empty(1, self.NUM_DOF, device=self.model_device, dtype=torch.float32)
 
         # actions
         self.num_actions = self.NUM_ACTIONS
         self.get_logger().info("[Env] action scale: {:.2f}".format(self.action_scale))
         
-        self.actions = torch.zeros(self.NUM_ACTIONS, device= self.model_device, dtype= torch.float32)    
+        self.actions = torch.zeros(self.NUM_ACTIONS, device=self.model_device, dtype=torch.float32)    
 
         ###################### hardware related #####################
         # Use policy-specific joint and torque limits
@@ -399,7 +398,7 @@ class Go2ROS2Node(Node):
                 vy = vy * (self.cmd_ny_range[1] - self.cmd_ny_range[0]) - self.cmd_ny_range[0]
             else:
                 vy = 0
-            self.xyyaw_command = torch.tensor([[vx, vy, yaw]], device= self.model_device, dtype= torch.float32)
+            self.xyyaw_command = torch.tensor([[vx, vy, yaw]], device=self.model_device, dtype=torch.float32)
 
         # refer to Unitree Remote Control data structure, msg.keys is a bit mask
         # 00000000 00000001 means pressing the 0-th button (R1)
@@ -482,9 +481,9 @@ class Go2ROS2Node(Node):
             self.low_state_buffer.imu_state.quaternion[2],
             self.low_state_buffer.imu_state.quaternion[3],
             self.low_state_buffer.imu_state.quaternion[0],
-            ], device= self.model_device, dtype= torch.float32).unsqueeze(0)
+            ], device=self.model_device, dtype=torch.float32).unsqueeze(0)
         roll, pitch, yaw = get_euler_xyz(quat_xyzw)
-        imu_obs = torch.tensor([[roll, pitch]], device= self.model_device, dtype= torch.float32)
+        imu_obs = torch.tensor([[roll, pitch]], device=self.model_device, dtype=torch.float32)
         return imu_obs
 
     def _get_base_rpy_obs(self):
@@ -494,15 +493,15 @@ class Go2ROS2Node(Node):
             self.low_state_buffer.imu_state.quaternion[2],
             self.low_state_buffer.imu_state.quaternion[3],
             self.low_state_buffer.imu_state.quaternion[0],
-            ], device= self.model_device, dtype= torch.float32).unsqueeze(0)
+            ], device=self.model_device, dtype=torch.float32).unsqueeze(0)
         roll, pitch, yaw = get_euler_xyz(quat_xyzw)
-        base_rpy = torch.tensor([[roll, pitch, yaw]], device= self.model_device, dtype= torch.float32)
+        base_rpy = torch.tensor([[roll, pitch, yaw]], device=self.model_device, dtype=torch.float32)
         return base_rpy
 
     def _get_delta_yaw_obs(self):
         yaw = 0
         delta_yaw, delta_next_yaw = 0, 0
-        yaw_info = torch.tensor([[0, delta_yaw, delta_next_yaw]], device= self.model_device, dtype= torch.float32)
+        yaw_info = torch.tensor([[0, delta_yaw, delta_next_yaw]], device=self.model_device, dtype=torch.float32)
         return yaw_info
 
     def _get_commands_obs(self):
@@ -510,10 +509,10 @@ class Go2ROS2Node(Node):
             vx, vy, yaw = self.xyyaw_command[0, :]
             if self.policy_source == "legged-loco":
                 # legged-loco uses full 3DOF commands: [lin_vel_x, lin_vel_y, ang_vel_z]
-                commands = torch.tensor([[vx, vy, yaw]], device= self.model_device, dtype= torch.float32)
+                commands = torch.tensor([[vx, vy, yaw]], device=self.model_device, dtype=torch.float32)
             else:
                 # EPO uses only forward velocity: [0, 0, vx]
-                commands = torch.tensor([[0, 0, vx]], device= self.model_device, dtype= torch.float32)
+                commands = torch.tensor([[0, 0, vx]], device=self.model_device, dtype=torch.float32)
             return commands
         else:
             return torch.tensor([[0., 0., 0.]], device=self.model_device)
@@ -579,9 +578,9 @@ class Go2ROS2Node(Node):
             yaw_time = time.monotonic()
 
             if self.mode == "locomotion":
-                locomotion_walk = torch.tensor([[1, 0]], device= self.model_device, dtype= torch.float32) # locomotion
+                locomotion_walk = torch.tensor([[1, 0]], device=self.model_device, dtype=torch.float32) # locomotion
             elif self.mode == "walk":
-                locomotion_walk = torch.tensor([[0, 1]], device= self.model_device, dtype= torch.float32) # walk
+                locomotion_walk = torch.tensor([[0, 1]], device=self.model_device, dtype=torch.float32) # walk
 
             contact = self._get_contact_filt_obs()  # (1, 4)
             contact_time = time.monotonic()
