@@ -27,10 +27,7 @@ import sys
 import threading
 
 from utils import load_configuration
-
-ROBOT_SPORT_API_ID_BALANCESTAND = 1002
-ROBOT_SPORT_API_ID_STANDUP = 1004
-ROBOT_SPORT_API_ID_STANDDOWN = 1005
+from utils.sport_mode_manager import SportModeManager
 
 
 def start_main_loop_timer(handler, duration):
@@ -39,77 +36,7 @@ def start_main_loop_timer(handler, duration):
         duration, # in sec
         lambda: main_loop(handler),
     )
-
-
-def main_loop(handler):
-    """Main control loop for the Go2 robot - handles different operational modes based on joystick input"""
-    if handler.use_sport_mode:
-        if (handler.joy_stick_buffer.keys & handler.WirelessButtons.R1):
-            handler.log_info("In the sport mode, R1 pressed, robot will stand up.")
-            handler._sport_mode_change(ROBOT_SPORT_API_ID_STANDUP)
-        if (handler.joy_stick_buffer.keys & handler.WirelessButtons.R2):
-            handler.log_info("In the sport mode, R2 pressed, robot will sit down.")
-            handler._sport_mode_change(ROBOT_SPORT_API_ID_STANDDOWN)
-
-        if (handler.joy_stick_buffer.keys & handler.WirelessButtons.X):
-            handler.log_info("In the sport mode, X pressed, robot will balance stand.")
-            handler._sport_mode_change(ROBOT_SPORT_API_ID_BALANCESTAND)
-
-        if (handler.joy_stick_buffer.keys & handler.WirelessButtons.L1):
-            handler.log_info("Exist the sport mode. Switch to stand policy.")
-            handler.use_sport_mode = False
-            handler._sport_state_change(0)
-            handler.use_stand_policy = True
-            handler.use_locomotion_policy = False
     
-    if handler.use_stand_policy:
-        stand_action = handler.get_stand_action()
-        handler.send_stand_action(stand_action)
-    
-    if (handler.joy_stick_buffer.keys & handler.WirelessButtons.Y):
-        handler.log_info("Y pressed, use the locomotion policy")
-        handler.use_stand_policy = False
-        handler.use_locomotion_policy = True
-        handler.use_sport_mode = False
-        handler.global_counter = 0
-
-    if handler.use_locomotion_policy:
-        handler.use_stand_policy = False
-        handler.use_sport_mode = False
-        
-        # Handle X button for legged-loco policy - set forward command
-        if (handler.joy_stick_buffer.keys & handler.WirelessButtons.X):
-            if handler.policy_source == "legged-loco":
-                handler.log_info("X pressed, setting legged-loco command to [0.4, 0, 0]")
-                handler.xyyaw_command = torch.tensor([[0.4, 0.0, 0.0]], device=handler.device, dtype=torch.float32)
-        
-        proprio = handler.get_proprio()
-        proprio_history = handler._get_history_proprio()
-        if handler.global_counter % handler.visual_update_interval == 0:
-            depth_image = handler._get_depth_image()
-            if handler.global_counter == 0:
-                handler.last_depth_image = depth_image
-            handler.depth_latent_yaw = handler.depth_encode(handler.last_depth_image, proprio)
-            handler.last_depth_image = depth_image
-
-        obs = handler.turn_obs(proprio, handler.depth_latent_yaw, proprio_history, handler.n_proprio, handler.n_depth_latent, handler.n_hist_len)
-
-        action = handler.policy(obs)
-
-        handler.send_action(action)
-
-        handler.global_counter += 1
-
-    if (handler.joy_stick_buffer.keys & handler.WirelessButtons.L2):
-        handler.log_info("L2 pressed, stop using locomotion policy, switch to sport mode.")
-        handler.use_stand_policy = False
-        handler.use_locomotion_policy = False
-        handler.use_sport_mode = True
-        handler.reset_obs()
-        handler._sport_state_change(1)
-        handler._sport_mode_change(ROBOT_SPORT_API_ID_BALANCESTAND)
-
-
 def handle_timing_mode(handler, timing_mode, duration):
     if timing_mode == "ros_timer":
         # Use ROS timer for timing control
@@ -138,20 +65,39 @@ def handle_timing_mode(handler, timing_mode, duration):
         raise ValueError(f"Invalid timing mode: {timing_mode}")
 
 
-def create_observation_processor(estimator, hist_encoder):
-    """
-    Create observation processing function
+def main_loop(handler: Go2Handler):
+    """Main control loop for the Go2 robot - handles different operational modes based on joystick input"""
+    # Create SportModeManager instance
+    sport_mode_manager = SportModeManager(handler)
     
-    Args:
-        estimator: Speed estimator
-        hist_encoder: History encoder
-        
-    Returns:
-        turn_obs: Observation processing function
-    """
+    use_locomotion_policy = sport_mode_manager.sport_mode_before_locomotion()
 
-    
-    return turn_obs
+    if use_locomotion_policy:
+        # Handle X button for legged-loco policy - set forward command
+        if (handler.joy_stick_buffer.keys & handler.WirelessButtons.X):
+            if handler.policy_source == "legged-loco":
+                handler.log_info("X pressed, setting legged-loco command to [0.4, 0, 0]")
+                handler.xyyaw_command = torch.tensor([[0.4, 0.0, 0.0]], device=handler.device, dtype=torch.float32)
+        
+        proprio = handler.get_proprio()
+        proprio_history = handler._get_history_proprio()
+        if handler.global_counter % handler.visual_update_interval == 0:
+            depth_image = handler._get_depth_image()
+            if handler.global_counter == 0:
+                handler.last_depth_image = depth_image
+            handler.depth_latent_yaw = handler.depth_encode(handler.last_depth_image, proprio)
+            handler.last_depth_image = depth_image
+
+        obs = handler.turn_obs(proprio, handler.depth_latent_yaw, proprio_history, handler.n_proprio, handler.n_depth_latent, handler.n_hist_len)
+
+        action = handler.policy(obs)
+
+        handler.send_action(action)
+
+        handler.global_counter += 1
+
+    if sport_mode_manager.sport_mode_after_locomotion():
+        handler.log_info("L2 pressed, stop using locomotion policy, switch back to sport mode.")
 
 
 def create_depth_encoder(depth_encoder):

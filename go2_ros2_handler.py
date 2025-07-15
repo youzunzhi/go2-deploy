@@ -233,9 +233,6 @@ class Go2Handler:
         
         self.global_counter = 0
         self.visual_update_interval = 5
-        self.use_stand_policy = False
-        self.use_locomotion_policy = False
-        self.use_sport_mode = True
 
     def init_stand_config(self):
         self.startPos = [0.0] * 12
@@ -384,41 +381,14 @@ class Go2Handler:
                 vy = 0
             self.xyyaw_command = torch.tensor([[vx, vy, yaw]], device=self.device, dtype=torch.float32)
 
-        # refer to Unitree Remote Control data structure, msg.keys is a bit mask
-        # 00000000 00000001 means pressing the 0-th button (R1)
-        # 00000000 00000010 means pressing the 1-th button (L1)
-        # 10000000 00000000 means pressing the 15-th button (left)
-        
-        # if (msg.keys & self.WirelessButtons.R2) or (msg.keys & self.WirelessButtons.L2): # R2 or L2 is pressed
-        # if  msg.keys & self.WirelessButtons.L2: # R2 or L2 is pressed
-        #     self.get_logger().warn("R2 or L2 is pressed, the motors and this process shuts down.")
-        #     self._turn_off_motors()
-        #     raise SystemExit()
-
-        # roll-pitch target
-        if hasattr(self, "roll_pitch_yaw_cmd"):
-            if (msg.keys & self.WirelessButtons.up):
-                self.roll_pitch_yaw_cmd[0, 1] += 0.1
-                self.log_info("Pitch Command: " + str(self.roll_pitch_yaw_cmd))
-            if (msg.keys & self.WirelessButtons.down):
-                self.roll_pitch_yaw_cmd[0, 1] -= 0.1
-                self.log_info("Pitch Command: " + str(self.roll_pitch_yaw_cmd))
-            if (msg.keys & self.WirelessButtons.left):
-                self.roll_pitch_yaw_cmd[0, 0] -= 0.1
-                self.log_info("Roll Command: " + str(self.roll_pitch_yaw_cmd))
-            if (msg.keys & self.WirelessButtons.right):
-                self.roll_pitch_yaw_cmd[0, 0] += 0.1
-                self.log_info("Roll Command: " + str(self.roll_pitch_yaw_cmd))
-
     def _depth_data_callback(self, msg):
         self.depth_data = torch.tensor(msg.data, dtype=torch.float32).reshape(1, 58, 87).to(self.device)
 
-    
-    def _sport_mode_change(self, mode):
+    def _sport_mode_command(self, api_id):
         msg = Request()
 
         msg.header.identity.id = 0
-        msg.header.identity.api_id = mode
+        msg.header.identity.api_id = api_id
         msg.header.lease.id = 0
         msg.header.policy.priority = 0
         msg.header.policy.noreply = False
@@ -428,7 +398,7 @@ class Go2Handler:
 
         self.sport_mode_pub.publish(msg)
     
-    def _sport_state_change(self, mode):
+    def _sport_mode_switch(self, mode):
         msg = Request()
 
         # Fill the header
@@ -438,11 +408,11 @@ class Go2Handler:
         msg.header.policy.noreply = False
 
         if mode == 0:
-            # Release mode (switch to normal mode) - use api_id 1003
+            # Release mode (switch to low-level control mode) - use api_id 1003
             msg.header.identity.api_id = 1003
             msg.parameter = '{}'
         elif mode == 1:
-            # Select MCF mode - use api_id 1002
+            # Select sport mode - use api_id 1002
             msg.header.identity.api_id = 1002
             msg.parameter = '{"name": "mcf"}'
         
