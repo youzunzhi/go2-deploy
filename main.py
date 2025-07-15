@@ -45,18 +45,18 @@ def main_loop(handler):
     """Main control loop for the Go2 robot - handles different operational modes based on joystick input"""
     if handler.use_sport_mode:
         if (handler.joy_stick_buffer.keys & handler.WirelessButtons.R1):
-            handler.node.get_logger().info("In the sport mode, R1 pressed, robot will stand up.")
+            handler.log_info("In the sport mode, R1 pressed, robot will stand up.")
             handler._sport_mode_change(ROBOT_SPORT_API_ID_STANDUP)
         if (handler.joy_stick_buffer.keys & handler.WirelessButtons.R2):
-            handler.node.get_logger().info("In the sport mode, R2 pressed, robot will sit down.")
+            handler.log_info("In the sport mode, R2 pressed, robot will sit down.")
             handler._sport_mode_change(ROBOT_SPORT_API_ID_STANDDOWN)
 
         if (handler.joy_stick_buffer.keys & handler.WirelessButtons.X):
-            handler.node.get_logger().info("In the sport mode, X pressed, robot will balance stand.")
+            handler.log_info("In the sport mode, X pressed, robot will balance stand.")
             handler._sport_mode_change(ROBOT_SPORT_API_ID_BALANCESTAND)
 
         if (handler.joy_stick_buffer.keys & handler.WirelessButtons.L1):
-            handler.node.get_logger().info("Exist the sport mode. Switch to stand policy.")
+            handler.log_info("Exist the sport mode. Switch to stand policy.")
             handler.use_sport_mode = False
             handler._sport_state_change(0)
             handler.use_stand_policy = True
@@ -67,7 +67,7 @@ def main_loop(handler):
         handler.send_stand_action(stand_action)
     
     if (handler.joy_stick_buffer.keys & handler.WirelessButtons.Y):
-        handler.node.get_logger().info("Y pressed, use the locomotion policy")
+        handler.log_info("Y pressed, use the locomotion policy")
         handler.use_stand_policy = False
         handler.use_locomotion_policy = True
         handler.use_sport_mode = False
@@ -80,7 +80,7 @@ def main_loop(handler):
         # Handle X button for legged-loco policy - set forward command
         if (handler.joy_stick_buffer.keys & handler.WirelessButtons.X):
             if handler.policy_source == "legged-loco":
-                handler.node.get_logger().info("X pressed, setting legged-loco command to [0.4, 0, 0]")
+                handler.log_info("X pressed, setting legged-loco command to [0.4, 0, 0]")
                 handler.xyyaw_command = torch.tensor([[0.4, 0.0, 0.0]], device=handler.device, dtype=torch.float32)
         
         proprio = handler.get_proprio()
@@ -101,10 +101,10 @@ def main_loop(handler):
         handler.global_counter += 1
 
     if (handler.joy_stick_buffer.keys & handler.WirelessButtons.L2):
-        handler.node.get_logger().info("L2 pressed, stop using locomotion policy, switch to sport mode.")
+        handler.log_info("L2 pressed, stop using locomotion policy, switch to sport mode.")
         handler.use_stand_policy = False
-        node.use_locomotion_policy = False
-        node.use_sport_mode = True
+        handler.use_locomotion_policy = False
+        handler.use_sport_mode = True
         handler.reset_obs()
         handler._sport_state_change(1)
         handler._sport_mode_change(ROBOT_SPORT_API_ID_BALANCESTAND)
@@ -113,14 +113,14 @@ def main_loop(handler):
 def handle_timing_mode(handler, timing_mode, duration):
     if timing_mode == "ros_timer":
         # Use ROS timer for timing control
-        handler.node.get_logger().info('Model and Policy are ready')
+        handler.log_info('Model and Policy are ready')
         start_main_loop_timer(handler, duration)
         rclpy.spin(handler.node)
     
     elif timing_mode == "manual_control":
         # Manually control timing for more precise control
         rclpy.spin_once(handler.node, timeout_sec=0.)
-        handler.node.get_logger().info("Model and Policy are ready")
+        handler.log_info("Model and Policy are ready")
         
         while rclpy.ok():
             # Track iteration time to maintain desired frequency
@@ -221,10 +221,10 @@ def log_system_info(handler, logdir, duration):
         logdir: Model directory
         duration: Control cycle
     """
-    handler.node.get_logger().info("Model loaded from: {}".format(osp.join(logdir)))
-    handler.node.get_logger().info("Control Duration: {} sec".format(duration))
-    handler.node.get_logger().info("Motor Stiffness (kp): {}".format(handler.kp))
-    handler.node.get_logger().info("Motor Damping (kd): {}".format(handler.kd))
+    handler.log_info("Model loaded from: {}".format(osp.join(logdir)))
+    handler.log_info("Control Duration: {} sec".format(duration))
+    handler.log_info("Motor Stiffness (kp): {}".format(handler.kp))
+    handler.log_info("Motor Damping (kd): {}".format(handler.kd))
 
 
 def setup_models(logdir, device):
