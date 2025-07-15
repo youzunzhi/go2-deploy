@@ -5,7 +5,6 @@ from go2_ros2_node import Go2ROS2Node, get_euler_xyz
 import os
 import ast
 import os.path as osp
-import json
 import time
 from collections import OrderedDict
 from copy import deepcopy
@@ -27,6 +26,7 @@ import time
 import sys
 import threading
 
+from utils import load_configuration
 
 ROBOT_SPORT_API_ID_BALANCESTAND = 1002
 ROBOT_SPORT_API_ID_STANDUP = 1004
@@ -83,47 +83,20 @@ def main_loop(node):
                 node.get_logger().info("X pressed, setting legged-loco command to [0.4, 0, 0]")
                 node.xyyaw_command = torch.tensor([[0.4, 0.0, 0.0]], device=node.model_device, dtype=torch.float32)
         
-        start_time = time.monotonic()
-
         proprio = node.get_proprio()
-        get_pro_time = time.monotonic()
-
         proprio_history = node._get_history_proprio()
-        get_hist_pro_time = time.monotonic()
-
-        # print('proprioception: ', proprio)
-        # print('history proprioception: ', proprio_history)
-
         if node.global_counter % node.visual_update_interval == 0:
             depth_image = node._get_depth_image()
             if node.global_counter == 0:
                 node.last_depth_image = depth_image
             node.depth_latent_yaw = node.depth_encode(node.last_depth_image, proprio)
             node.last_depth_image = depth_image
-            # print('depth latent: ', node.depth_latent_yaw)
-        get_obs_time = time.monotonic()
 
         obs = node.turn_obs(proprio, node.depth_latent_yaw, proprio_history, node.n_proprio, node.n_depth_latent, node.n_hist_len)
-        turn_obs_time = time.monotonic()
 
         action = node.policy(obs)
-        policy_time = time.monotonic()
-        # print('action before clip and normalize: ', action)
 
         node.send_action(action)
-        print('action: ', action)
-
-        publish_time = time.monotonic()
-        print(
-            "get proprio time: {:.5f}".format(get_pro_time - start_time),
-            "get hist pro time: {:.5f}".format(get_hist_pro_time - get_pro_time),
-            "get_depth time: {:.5f}".format(get_obs_time - get_hist_pro_time),
-            "get obs time: {:.5f}".format(get_obs_time - start_time),
-            "turn_obs_time: {:.5f}".format(turn_obs_time - get_obs_time),
-            "policy_time: {:.5f}".format(policy_time - turn_obs_time),
-            "publish_time: {:.5f}".format(publish_time - policy_time),
-            "total time: {:.5f}".format(publish_time - start_time)
-        )
 
         node.global_counter += 1
 
@@ -165,248 +138,6 @@ def handle_timing_mode(env_node, timing_mode, duration):
         raise ValueError(f"Invalid timing mode: {timing_mode}")
 
 
-def load_configuration(logdir):
-    """
-    Load configuration parameters from files and extract them for Go2ROS2Node initialization
-    
-    Args:
-        logdir: Directory path containing the configuration file
-        
-    Returns:
-        config_params: Dictionary with parameter names as keys for Go2ROS2Node constructor
-        duration: Control cycle duration
-    """
-    
-    policy_source = determine_policy_source(logdir)
-
-    # Extract the necessary parameters for Go2ROS2Node
-    if policy_source == "EPO":
-        config_path = osp.join(logdir, "config.json")
-        with open(config_path, "r") as f:
-            full_config = json.load(f, object_pairs_hook=OrderedDict)
-
-        # EPO uses identity mapping (simulation order already matches hardware)
-        joint_names = [
-            "FR_hip_joint",     # 0
-            "FR_thigh_joint",   # 1
-            "FR_calf_joint",    # 2
-            "FL_hip_joint",     # 3
-            "FL_thigh_joint",   # 4
-            "FL_calf_joint",    # 5
-            "RR_hip_joint",     # 6
-            "RR_thigh_joint",   # 7
-            "RR_calf_joint",    # 8
-            "RL_hip_joint",     # 9
-            "RL_thigh_joint",   # 10
-            "RL_calf_joint",    # 11
-        ]
-        joint_map = get_joint_map_from_names(joint_names)
-        default_joint_pos_dict = full_config.get("init_state", {}).get("default_joint_angles", {})
-        default_joint_pos = parse_default_joint_pos(default_joint_pos_dict, joint_names)
-        kp = full_config.get("control", {}).get("stiffness", {}).get("joint", 40.)
-        kd = full_config.get("control", {}).get("damping", {}).get("joint", 1.)
-        obs_scales = full_config["normalization"]["obs_scales"]
-        action_scale = full_config.get("control", {}).get("action_scale", 0.25)
-        clip_obs = full_config["normalization"]["clip_obs"]
-        clip_actions = full_config["normalization"]["clip_actions"]
-        
-    elif policy_source == "legged-loco":
-        config_path = osp.join(logdir, "params/env.yaml")
-        with open(config_path, "r") as f:
-            full_config = yaml.safe_load(f)
-
-        # legged-loco uses grouped joint order: [all hips, all thighs, all calves]
-        # isaaclab sim: FL_hip(0), FR_hip(1), RL_hip(2), RR_hip(3), FL_thigh(4), FR_thigh(5), RL_thigh(6), RR_thigh(7), FL_calf(8), FR_calf(9), RL_calf(10), RR_calf(11)
-        joint_names = [
-            "FL_hip_joint",     # 0
-            "FR_hip_joint",     # 1  
-            "RL_hip_joint",     # 2
-            "RR_hip_joint",     # 3
-            "FL_thigh_joint",   # 4
-            "FR_thigh_joint",   # 5
-            "RL_thigh_joint",   # 6
-            "RR_thigh_joint",   # 7
-            "FL_calf_joint",    # 8
-            "FR_calf_joint",    # 9
-            "RL_calf_joint",    # 10
-            "RR_calf_joint",    # 11
-        ]
-        # joint_map = [
-        #     3, 0, 9, 6,   # Hip joints: FL->3, FR->0, RL->9, RR->6  
-        #     4, 1, 10, 7,  # Thigh joints: FL->4, FR->1, RL->10, RR->7
-        #     5, 2, 11, 8   # Calf joints: FL->5, FR->2, RL->11, RR->8
-        # ]
-        joint_map = get_joint_map_from_names(joint_names)
-        default_joint_pos_dict = full_config.get("scene", {}).get("robot", {}).get("init_state", {}).get("joint_pos", {})
-        default_joint_pos = parse_default_joint_pos(default_joint_pos_dict, joint_names)
-        kp = full_config.get("scene", {}).get("robot", {}).get("actuators", {}).get("base_legs", {}).get("stiffness", 40.0)
-        kd = full_config.get("scene", {}).get("robot", {}).get("actuators", {}).get("base_legs", {}).get("damping", 1.0)
-        obs_scales = {}
-        action_scale = full_config.get("actions", {}).get("joint_pos", {}).get("scale", 0.25)
-        clip_obs = 100.0
-        clip_actions = None
-    else:
-        raise ValueError(f"Unknown policy source: {policy_source}")
-
-    # Set control cycle = dt * decimation = 0.005 * 4 = 0.02 (fixed at 20ms)
-    duration = 0.02
-
-    return joint_map, default_joint_pos, kp, kd, obs_scales, action_scale, clip_obs, clip_actions, duration
-
-
-def get_joint_map_from_names(joint_names):
-    """
-    Generate joint map from simulation order to hardware order based on joint names.
-    
-    Hardware order: FR_hip(0), FR_thigh(1), FR_calf(2), FL_hip(3), FL_thigh(4), FL_calf(5), 
-                   RR_hip(6), RR_thigh(7), RR_calf(8), RL_hip(9), RL_thigh(10), RL_calf(11)
-    
-    Args:
-        joint_names: List of joint names in simulation order
-        
-    Returns:
-        joint_map: List where each element is the hardware index for the corresponding simulation index
-    """
-    # Define hardware order mapping: joint_name -> hardware_index
-    hardware_order = {
-        "FR_hip_joint": 0,
-        "FR_thigh_joint": 1,
-        "FR_calf_joint": 2,
-        "FL_hip_joint": 3,
-        "FL_thigh_joint": 4,
-        "FL_calf_joint": 5,
-        "RR_hip_joint": 6,
-        "RR_thigh_joint": 7,
-        "RR_calf_joint": 8,
-        "RL_hip_joint": 9,
-        "RL_thigh_joint": 10,
-        "RL_calf_joint": 11,
-    }
-    
-    # Generate joint map: simulation_index -> hardware_index
-    joint_map = []
-    for joint_name in joint_names:
-        if joint_name not in hardware_order:
-            raise ValueError(f"Unknown joint name: {joint_name}. Valid joint names are: {list(hardware_order.keys())}")
-        joint_map.append(hardware_order[joint_name])
-    
-    return joint_map
-
-
-def parse_default_joint_pos(default_joint_pos_dict, joint_names):
-    """
-    Parse default joint positions from the dictionary (name: value) to list of values in simulation order
-
-    Args:
-        default_joint_pos_dict: Dictionary of default joint positions (name or regex pattern: value)
-        joint_names: List of joint names in simulation order
-        
-    Returns:
-        default_joint_pos: List of default joint positions in simulation order
-    """
-    # Check if this is a regex pattern dictionary (legged-loco) or direct names (EPO)
-    # If any key contains regex special characters, treat as regex patterns
-    has_regex_patterns = any(
-        any(char in key for char in ['.*', '[', ']', '(', ')', '+', '*', '?', '^', '$'])
-        for key in default_joint_pos_dict.keys()
-    )
-    
-    if has_regex_patterns:
-        # Expand regex patterns to actual joint names
-        expanded_dict = expand_regex_joint_positions(default_joint_pos_dict, joint_names)
-        default_joint_pos_dict = expanded_dict
-    
-    # Convert to list in simulation order
-    default_joint_pos = []
-    for i in range(len(joint_names)):
-        if joint_names[i] in default_joint_pos_dict:
-            default_joint_pos.append(default_joint_pos_dict[joint_names[i]])
-        else:
-            raise KeyError(f"Joint '{joint_names[i]}' not found in default joint positions")
-    
-    return default_joint_pos
-
-
-def expand_regex_joint_positions(regex_joint_pos_dict, joint_names):
-    """
-    Expand regex patterns in legged-loco joint positions to actual joint names
-    
-    Args:
-        regex_joint_pos_dict: Dictionary with regex patterns as keys and joint positions as values
-        joint_names: List of actual joint names to match against
-        
-    Returns:
-        expanded_dict: Dictionary with actual joint names as keys and positions as values
-    """
-    expanded_dict = {}
-    
-    for pattern, value in regex_joint_pos_dict.items():
-        # Find all joint names that match this pattern
-        for joint_name in joint_names:
-            if re.fullmatch(pattern, joint_name):
-                expanded_dict[joint_name] = value
-    
-    return expanded_dict
-
-
-def load_base_model(logdir, device):
-    """
-    Load base model (JIT format)
-    
-    Args:
-        logdir: Model file directory
-        device: Computing device (cuda/cpu)
-        
-    Returns:
-        base_model: Loaded base model
-        estimator: Speed estimator
-        hist_encoder: History encoder
-        actor: Action generator
-    """
-    base_model_name = 'base_jit.pt'
-    base_model_path = os.path.join(logdir, base_model_name)
-    
-    # Load base model in JIT format
-    base_model = torch.jit.load(base_model_path, map_location=device)
-    base_model.eval()
-    
-    # Extract model components
-    estimator = base_model.estimator.estimator
-    hist_encoder = base_model.actor.history_encoder
-    actor = base_model.actor.actor_backbone
-    
-    return base_model, estimator, hist_encoder, actor
-
-
-def load_vision_model(logdir, device):
-    """
-    Load vision model (depth encoder)
-    
-    Args:
-        logdir: Model file directory
-        device: Computing device
-        
-    Returns:
-        depth_encoder: Depth encoder model
-    """
-    vision_model_name = 'vision_weight.pt'
-    vision_model_path = os.path.join(logdir, vision_model_name)
-    
-    # Load vision model weights
-    vision_model = torch.load(vision_model_path, map_location=device)
-    
-    # Create depth encoder
-    depth_backbone = DepthOnlyFCBackbone58x87(None, 32, 512)
-    depth_encoder = RecurrentDepthBackbone(depth_backbone, None).to(device)
-    
-    # Load pre-trained weights
-    depth_encoder.load_state_dict(vision_model['depth_encoder_state_dict'])
-    depth_encoder.to(device)
-    depth_encoder.eval()
-    
-    return depth_encoder
-
-
 def create_observation_processor(estimator, hist_encoder):
     """
     Create observation processing function
@@ -418,40 +149,7 @@ def create_observation_processor(estimator, hist_encoder):
     Returns:
         turn_obs: Observation processing function
     """
-    def turn_obs(proprio, depth_latent_yaw, proprio_history, n_proprio, n_depth_latent, n_hist_len):
-        """
-        Convert raw sensor data to neural network input format
-        
-        Args:
-            proprio: Proprioceptive data
-            depth_latent_yaw: Depth features and yaw angle
-            proprio_history: Historical proprioceptive data
-            n_proprio: Proprioceptive data dimension
-            n_depth_latent: Depth feature dimension
-            n_hist_len: History length
-            
-        Returns:
-            obs: Processed observation vector
-        """
-        # Separate depth features and yaw angle
-        depth_latent = depth_latent_yaw[:, :-2]
-        yaw = depth_latent_yaw[:, -2:] * 1.5
-        print('yaw: ', yaw)
-        
-        # Update yaw angle in proprioceptive data
-        proprio[:, 6:8] = yaw
-        
-        # Estimate linear velocity features
-        lin_vel_latent = estimator(proprio)
-        
-        # Process historical proprioceptive data
-        activation = nn.ELU()
-        priv_latent = hist_encoder(activation, proprio_history.view(-1, n_hist_len, n_proprio))
-        
-        # Concatenate all features
-        obs = torch.cat([proprio, depth_latent, lin_vel_latent, priv_latent], dim=-1)
-        
-        return obs
+
     
     return turn_obs
 
@@ -568,24 +266,6 @@ def setup_models(logdir, device):
         raise ValueError(f"Unsupported policy source: {policy_source}")
     
     return turn_obs, encode_depth, actor_model
-
-
-def determine_policy_source(logdir):
-    """
-    Determine the policy source based on directory path
-    
-    Args:
-        logdir: Model file directory
-        
-    Returns:
-        str: Policy source ('EPO' or 'legged-loco')
-    """
-    if "EPO" in logdir:
-        return "EPO"
-    elif "legged-loco" in logdir:
-        return "legged-loco"
-    else:
-        return "unknown"
 
 
 def load_legged_loco_policy(logdir, device):
@@ -719,7 +399,6 @@ def main(args):
         mode=args.mode,
         kp=kp,
         kd=kd,
-        obs_scales=obs_scales,
         action_scale=action_scale,
         clip_obs=clip_obs,
         clip_actions=clip_actions,
