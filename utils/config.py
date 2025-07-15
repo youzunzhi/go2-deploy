@@ -6,13 +6,13 @@ import re
 
 def load_configuration(logdir):
     """
-    Load configuration parameters from files and extract them for Go2ROS2Node initialization
+    Load configuration parameters from files and extract them for Go2Handler initialization
     
     Args:
         logdir: Directory path containing the configuration file
         
     Returns:
-        config_params: Dictionary with parameter names as keys for Go2ROS2Node constructor
+        config_params: Dictionary with parameter names as keys for Go2Handler constructor
         duration: Control cycle duration
     """
     
@@ -23,7 +23,7 @@ def load_configuration(logdir):
     else:
         raise ValueError(f"Unknown policy source: {logdir}")
         
-    # Extract the necessary parameters for Go2ROS2Node
+    # Extract the necessary parameters for Go2Handler
     if policy_source == "EPO":
         config_path = osp.join(logdir, "config.json")
         with open(config_path, "r") as f:

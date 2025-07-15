@@ -1,6 +1,6 @@
 import rclpy
 from rclpy.node import Node
-from go2_ros2_node import Go2ROS2Node, get_euler_xyz
+from go2_ros2_node import Go2Handler, get_euler_xyz
 
 import os
 import ast
@@ -33,102 +33,102 @@ ROBOT_SPORT_API_ID_STANDUP = 1004
 ROBOT_SPORT_API_ID_STANDDOWN = 1005
 
 
-def start_main_loop_timer(node, duration):
+def start_main_loop_timer(handler, duration):
     """Start the main loop timer for ROS-based timing control"""
-    node.main_loop_timer = node.create_timer(
+    handler.main_loop_timer = handler.node.create_timer(
         duration, # in sec
-        lambda: main_loop(node),
+        lambda: main_loop(handler),
     )
 
 
-def main_loop(node):
+def main_loop(handler):
     """Main control loop for the Go2 robot - handles different operational modes based on joystick input"""
-    if node.use_sport_mode:
-        if (node.joy_stick_buffer.keys & node.WirelessButtons.R1):
-            node.get_logger().info("In the sport mode, R1 pressed, robot will stand up.")
-            node._sport_mode_change(ROBOT_SPORT_API_ID_STANDUP)
-        if (node.joy_stick_buffer.keys & node.WirelessButtons.R2):
-            node.get_logger().info("In the sport mode, R2 pressed, robot will sit down.")
-            node._sport_mode_change(ROBOT_SPORT_API_ID_STANDDOWN)
+    if handler.use_sport_mode:
+        if (handler.joy_stick_buffer.keys & handler.WirelessButtons.R1):
+            handler.node.get_logger().info("In the sport mode, R1 pressed, robot will stand up.")
+            handler._sport_mode_change(ROBOT_SPORT_API_ID_STANDUP)
+        if (handler.joy_stick_buffer.keys & handler.WirelessButtons.R2):
+            handler.node.get_logger().info("In the sport mode, R2 pressed, robot will sit down.")
+            handler._sport_mode_change(ROBOT_SPORT_API_ID_STANDDOWN)
 
-        if (node.joy_stick_buffer.keys & node.WirelessButtons.X):
-            node.get_logger().info("In the sport mode, X pressed, robot will balance stand.")
-            node._sport_mode_change(ROBOT_SPORT_API_ID_BALANCESTAND)
+        if (handler.joy_stick_buffer.keys & handler.WirelessButtons.X):
+            handler.node.get_logger().info("In the sport mode, X pressed, robot will balance stand.")
+            handler._sport_mode_change(ROBOT_SPORT_API_ID_BALANCESTAND)
 
-        if (node.joy_stick_buffer.keys & node.WirelessButtons.L1):
-            node.get_logger().info("Exist the sport mode. Switch to stand policy.")
-            node.use_sport_mode = False
-            node._sport_state_change(0)
-            node.use_stand_policy = True
-            node.use_locomotion_policy = False
+        if (handler.joy_stick_buffer.keys & handler.WirelessButtons.L1):
+            handler.node.get_logger().info("Exist the sport mode. Switch to stand policy.")
+            handler.use_sport_mode = False
+            handler._sport_state_change(0)
+            handler.use_stand_policy = True
+            handler.use_locomotion_policy = False
     
-    if node.use_stand_policy:
-        stand_action = node.get_stand_action()
-        node.send_stand_action(stand_action)
+    if handler.use_stand_policy:
+        stand_action = handler.get_stand_action()
+        handler.send_stand_action(stand_action)
     
-    if (node.joy_stick_buffer.keys & node.WirelessButtons.Y):
-        node.get_logger().info("Y pressed, use the locomotion policy")
-        node.use_stand_policy = False
-        node.use_locomotion_policy = True
-        node.use_sport_mode = False
-        node.global_counter = 0
+    if (handler.joy_stick_buffer.keys & handler.WirelessButtons.Y):
+        handler.node.get_logger().info("Y pressed, use the locomotion policy")
+        handler.use_stand_policy = False
+        handler.use_locomotion_policy = True
+        handler.use_sport_mode = False
+        handler.global_counter = 0
 
-    if node.use_locomotion_policy:
-        node.use_stand_policy = False
-        node.use_sport_mode = False
+    if handler.use_locomotion_policy:
+        handler.use_stand_policy = False
+        handler.use_sport_mode = False
         
         # Handle X button for legged-loco policy - set forward command
-        if (node.joy_stick_buffer.keys & node.WirelessButtons.X):
-            if node.policy_source == "legged-loco":
-                node.get_logger().info("X pressed, setting legged-loco command to [0.4, 0, 0]")
-                node.xyyaw_command = torch.tensor([[0.4, 0.0, 0.0]], device=node.model_device, dtype=torch.float32)
+        if (handler.joy_stick_buffer.keys & handler.WirelessButtons.X):
+            if handler.policy_source == "legged-loco":
+                handler.node.get_logger().info("X pressed, setting legged-loco command to [0.4, 0, 0]")
+                handler.xyyaw_command = torch.tensor([[0.4, 0.0, 0.0]], device=handler.device, dtype=torch.float32)
         
-        proprio = node.get_proprio()
-        proprio_history = node._get_history_proprio()
-        if node.global_counter % node.visual_update_interval == 0:
-            depth_image = node._get_depth_image()
-            if node.global_counter == 0:
-                node.last_depth_image = depth_image
-            node.depth_latent_yaw = node.depth_encode(node.last_depth_image, proprio)
-            node.last_depth_image = depth_image
+        proprio = handler.get_proprio()
+        proprio_history = handler._get_history_proprio()
+        if handler.global_counter % handler.visual_update_interval == 0:
+            depth_image = handler._get_depth_image()
+            if handler.global_counter == 0:
+                handler.last_depth_image = depth_image
+            handler.depth_latent_yaw = handler.depth_encode(handler.last_depth_image, proprio)
+            handler.last_depth_image = depth_image
 
-        obs = node.turn_obs(proprio, node.depth_latent_yaw, proprio_history, node.n_proprio, node.n_depth_latent, node.n_hist_len)
+        obs = handler.turn_obs(proprio, handler.depth_latent_yaw, proprio_history, handler.n_proprio, handler.n_depth_latent, handler.n_hist_len)
 
-        action = node.policy(obs)
+        action = handler.policy(obs)
 
-        node.send_action(action)
+        handler.send_action(action)
 
-        node.global_counter += 1
+        handler.global_counter += 1
 
-    if (node.joy_stick_buffer.keys & node.WirelessButtons.L2):
-        node.get_logger().info("L2 pressed, stop using locomotion policy, switch to sport mode.")
-        node.use_stand_policy = False
+    if (handler.joy_stick_buffer.keys & handler.WirelessButtons.L2):
+        handler.node.get_logger().info("L2 pressed, stop using locomotion policy, switch to sport mode.")
+        handler.use_stand_policy = False
         node.use_locomotion_policy = False
         node.use_sport_mode = True
-        node.reset_obs()
-        node._sport_state_change(1)
-        node._sport_mode_change(ROBOT_SPORT_API_ID_BALANCESTAND)
+        handler.reset_obs()
+        handler._sport_state_change(1)
+        handler._sport_mode_change(ROBOT_SPORT_API_ID_BALANCESTAND)
 
 
-def handle_timing_mode(env_node, timing_mode, duration):
+def handle_timing_mode(handler, timing_mode, duration):
     if timing_mode == "ros_timer":
         # Use ROS timer for timing control
-        env_node.get_logger().info('Model and Policy are ready')
-        start_main_loop_timer(env_node, duration)
-        rclpy.spin(env_node)
+        handler.node.get_logger().info('Model and Policy are ready')
+        start_main_loop_timer(handler, duration)
+        rclpy.spin(handler.node)
     
     elif timing_mode == "manual_control":
         # Manually control timing for more precise control
-        rclpy.spin_once(env_node, timeout_sec=0.)
-        env_node.get_logger().info("Model and Policy are ready")
+        rclpy.spin_once(handler.node, timeout_sec=0.)
+        handler.node.get_logger().info("Model and Policy are ready")
         
         while rclpy.ok():
             # Track iteration time to maintain desired frequency
             main_loop_time = time.monotonic()
             
             # Run one iteration
-            main_loop(env_node)
-            rclpy.spin_once(env_node, timeout_sec=0.)
+            main_loop(handler)
+            rclpy.spin_once(handler.node, timeout_sec=0.)
             
             # Sleep remaining time to maintain frequency
             sleep_time = max(0, duration - (time.monotonic() - main_loop_time))
@@ -212,19 +212,19 @@ def create_policy(actor):
     return actor_model
 
 
-def log_system_info(env_node, logdir, duration):
+def log_system_info(handler, logdir, duration):
     """
     Print system configuration information
     
     Args:
-        env_node: ROS node
+        handler: Go2 Handler
         logdir: Model directory
         duration: Control cycle
     """
-    env_node.get_logger().info("Model loaded from: {}".format(osp.join(logdir)))
-    env_node.get_logger().info("Control Duration: {} sec".format(duration))
-    env_node.get_logger().info("Motor Stiffness (kp): {}".format(env_node.p_gains))
-    env_node.get_logger().info("Motor Damping (kd): {}".format(env_node.d_gains))
+    handler.node.get_logger().info("Model loaded from: {}".format(osp.join(logdir)))
+    handler.node.get_logger().info("Control Duration: {} sec".format(duration))
+    handler.node.get_logger().info("Motor Stiffness (kp): {}".format(handler.kp))
+    handler.node.get_logger().info("Motor Damping (kd): {}".format(handler.kd))
 
 
 def setup_models(logdir, device):
@@ -391,10 +391,10 @@ def main(args):
     device = "cuda"
 
     # 2. Create ROS node with configuration parameters
-    env_node = Go2ROS2Node(
+    handler = Go2Handler(
         joint_map=joint_map,
         default_joint_pos=default_joint_pos,
-        model_device=device,
+        device=device,
         dryrun=not args.nodryrun,
         mode=args.mode,
         kp=kp,
@@ -405,19 +405,21 @@ def main(args):
     )
 
     # 3. Print configuration information
-    log_system_info(env_node, args.logdir, duration)
+    log_system_info(handler, args.logdir, duration)
 
     # 4. Load models and create inference functions
     turn_obs, encode_depth, actor_model = setup_models(args.logdir, device)
 
     # 5. Register models to node
-    env_node.register_models(turn_obs=turn_obs, depth_encode=encode_depth, policy=actor_model)
-    env_node.start_ros_handlers()
-    env_node.warm_up()
+    handler.register_models(turn_obs=turn_obs, depth_encode=encode_depth, policy=actor_model)
+    handler.start_ros_handlers()
+    handler.warm_up()
 
     # 6. Start control loop
-    handle_timing_mode(env_node, args.timing_mode, duration)
+    handle_timing_mode(handler, args.timing_mode, duration)
 
+    # 7. Shutdown properly
+    handler.shutdown()
     rclpy.shutdown()
 
 

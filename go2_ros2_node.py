@@ -113,7 +113,7 @@ class Go2RobotCfgs:
     
     
 
-class Go2ROS2Node(Node):
+class Go2Handler:
     """ A proxy implementation of the real H1 robot. """
     class WirelessButtons:
         R1 =            0b00000001 # 1
@@ -161,7 +161,8 @@ class Go2ROS2Node(Node):
         mode="locomotion",
         policy_source="EPO", # Policy source: "EPO" or "legged-loco"
     ):
-        super().__init__("unitree_ros2_real")
+        # Create ROS2 node instance using composition
+        self.node = rclpy.create_node("unitree_ros2_real")
 
         # Store configuration parameters directly as attributes
         self.joint_map = joint_map
@@ -257,7 +258,7 @@ class Go2ROS2Node(Node):
         """ after initializing the env and policy, register ros related callbacks and topics
         """
         # Low-level command publisher
-        self.low_cmd_pub = self.create_publisher(
+        self.low_cmd_pub = self.node.create_publisher(
             LowCmd,
             self.low_cmd_topic,
             1
@@ -265,55 +266,55 @@ class Go2ROS2Node(Node):
         self.low_cmd_buffer = LowCmd()
 
         # Low-level state subscriber
-        self.low_state_sub = self.create_subscription(
+        self.low_state_sub = self.node.create_subscription(
             LowState,
             self.low_state_topic,
             self._low_state_callback,
             1
         )
-        self.get_logger().info("Low state subscriber started, waiting to receive low state messages.")
+        self.node.get_logger().info("Low state subscriber started, waiting to receive low state messages.")
 
         # Wireless controller subscriber
-        self.joy_stick_sub = self.create_subscription(
+        self.joy_stick_sub = self.node.create_subscription(
             WirelessController,
             self.joy_stick_topic,
             self._joy_stick_callback,
             1
         )
-        self.get_logger().info("Wireless controller subscriber started, waiting to receive wireless controller messages.")
+        self.node.get_logger().info("Wireless controller subscriber started, waiting to receive wireless controller messages.")
 
         # Sport mode publisher (Control the robot in built-in sport mode)
-        self.sport_mode_pub = self.create_publisher(
+        self.sport_mode_pub = self.node.create_publisher(
             Request,
             '/api/sport/request',
             1,
         )
 
         # Motion switcher publisher (Switch between built-in sport mode and low-level control mode)
-        self.motion_switcher_pub = self.create_publisher(
+        self.motion_switcher_pub = self.node.create_publisher(
             Request,
             '/api/motion_switcher/request',
             1,
         )
 
         # Depth image subscriber (For EPO policy)
-        self.depth_input_sub = self.create_subscription(
+        self.depth_input_sub = self.node.create_subscription(
             Float32MultiArray,
             self.depth_data_topic,
             self._depth_data_callback,
             1
         )
 
-        self.get_logger().info("ROS handlers started, waiting to recieve critical low state and wireless controller messages.")
+        self.node.get_logger().info("ROS handlers started, waiting to recieve critical low state and wireless controller messages.")
         if not self.dryrun:
-            self.get_logger().warn(f"You are running the code in no-dryrun mode and publishing to '{self.low_cmd_topic}', Please keep safe.")
+            self.node.get_logger().warn(f"You are running the code in no-dryrun mode and publishing to '{self.low_cmd_topic}', Please keep safe.")
         else:
-            self.get_logger().warn(f"You are publishing low cmd to '{self.low_cmd_topic}' because of dryrun mode, Please check and be safe.")
+            self.node.get_logger().warn(f"You are publishing low cmd to '{self.low_cmd_topic}' because of dryrun mode, Please check and be safe.")
         while rclpy.ok():
-            rclpy.spin_once(self)
+            rclpy.spin_once(self.node)
             if hasattr(self, "low_state_buffer") and hasattr(self, "joy_stick_buffer"):
                 break
-        self.get_logger().info("Low state and wireless message received, the robot is ready to go.")
+        self.node.get_logger().info("Low state and wireless message received, the robot is ready to go.")
 
     def reset_obs(self):
         self.startPos = [0.0] * 12
@@ -399,16 +400,16 @@ class Go2ROS2Node(Node):
         if hasattr(self, "roll_pitch_yaw_cmd"):
             if (msg.keys & self.WirelessButtons.up):
                 self.roll_pitch_yaw_cmd[0, 1] += 0.1
-                self.get_logger().info("Pitch Command: " + str(self.roll_pitch_yaw_cmd))
+                self.node.get_logger().info("Pitch Command: " + str(self.roll_pitch_yaw_cmd))
             if (msg.keys & self.WirelessButtons.down):
                 self.roll_pitch_yaw_cmd[0, 1] -= 0.1
-                self.get_logger().info("Pitch Command: " + str(self.roll_pitch_yaw_cmd))
+                self.node.get_logger().info("Pitch Command: " + str(self.roll_pitch_yaw_cmd))
             if (msg.keys & self.WirelessButtons.left):
                 self.roll_pitch_yaw_cmd[0, 0] -= 0.1
-                self.get_logger().info("Roll Command: " + str(self.roll_pitch_yaw_cmd))
+                self.node.get_logger().info("Roll Command: " + str(self.roll_pitch_yaw_cmd))
             if (msg.keys & self.WirelessButtons.right):
                 self.roll_pitch_yaw_cmd[0, 0] += 0.1
-                self.get_logger().info("Roll Command: " + str(self.roll_pitch_yaw_cmd))
+                self.node.get_logger().info("Roll Command: " + str(self.roll_pitch_yaw_cmd))
 
     def _depth_data_callback(self, msg):
         self.depth_data = torch.tensor(msg.data, dtype=torch.float32).reshape(1, 58, 87).to(self.device)
@@ -584,7 +585,7 @@ class Go2ROS2Node(Node):
                 self.stand_action[i] = (1 - self.percent_1) * self.startPos[i] + self.percent_1 * self._targetPos_1[i]
 
             if self.firstrun_target_1:
-                self.get_logger().info('Going to target Pos 1.', once=True)
+                self.node.get_logger().info('Going to target Pos 1.', once=True)
                 self.firstrun_target_1 = False
                 self.firstrun_target_2 = True
         if (self.percent_1 == 1) and (self.percent_2 <= 1):
@@ -593,7 +594,7 @@ class Go2ROS2Node(Node):
             for i in range(12):
                 self.stand_action[i] = (1 - self.percent_2) * self._targetPos_1[i] + self.percent_2 * self._targetPos_2[i]
 
-            self.get_logger().info('Staying in target Pos 2.', once=True)
+            self.node.get_logger().info('Staying in target Pos 2.', once=True)
 
         return self.stand_action
 
@@ -671,3 +672,8 @@ class Go2ROS2Node(Node):
         self.turn_obs = turn_obs
         self.depth_encode = depth_encode
         self.policy = policy
+    
+    def shutdown(self):
+        """Shutdown the ROS2 node properly"""
+        if hasattr(self, 'node'):
+            self.node.destroy_node()
