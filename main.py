@@ -165,7 +165,7 @@ def handle_timing_mode(env_node, timing_mode, duration):
         raise ValueError(f"Invalid timing mode: {timing_mode}")
 
 
-def load_and_parse_configuration(logdir):
+def load_configuration(logdir):
     """
     Load configuration parameters from files and extract them for Go2ROS2Node initialization
     
@@ -181,8 +181,11 @@ def load_and_parse_configuration(logdir):
 
     # Extract the necessary parameters for Go2ROS2Node
     if policy_source == "EPO":
-        # EPO/default uses identity mapping (simulation order already matches hardware)
-        joint_map = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+        config_path = osp.join(logdir, "config.json")
+        with open(config_path, "r") as f:
+            full_config = json.load(f, object_pairs_hook=OrderedDict)
+
+        # EPO uses identity mapping (simulation order already matches hardware)
         joint_names = [
             "FR_hip_joint",     # 0
             "FR_thigh_joint",   # 1
@@ -197,37 +200,23 @@ def load_and_parse_configuration(logdir):
             "RL_thigh_joint",   # 10
             "RL_calf_joint",    # 11
         ]
-        # EPO uses observation scaling from config.json
-        config_path = osp.join(logdir, "config.json")
-        with open(config_path, "r") as f:
-            full_config = json.load(f, object_pairs_hook=OrderedDict)
-        
-        # Extract configuration parameters directly
-        config_params = {
-            "clip_observations": full_config["normalization"]["clip_observations"],
-            "clip_actions": full_config["normalization"]["clip_actions"],
-            "obs_scales": {
-                "ang_vel": full_config["normalization"]["obs_scales"]["ang_vel"],
-                "dof_pos": full_config["normalization"]["obs_scales"]["dof_pos"],
-                "dof_vel": full_config["normalization"]["obs_scales"]["dof_vel"]
-            },
-            "control_type": full_config.get("control", {}).get("control_type", "P"),
-            "stiffness": full_config.get("control", {}).get("stiffness", {}).get("joint", 40.),
-            "damping": full_config.get("control", {}).get("damping", {}).get("joint", 1.),
-            "action_scale": full_config.get("control", {}).get("action_scale", 0.25),
-            "policy_source": policy_source
-        }
+        joint_map = get_joint_map_from_names(joint_names)
         default_joint_pos_dict = full_config.get("init_state", {}).get("default_joint_angles", {})
+        default_joint_pos = parse_default_joint_pos(default_joint_pos_dict, joint_names)
+        kp = full_config.get("control", {}).get("stiffness", {}).get("joint", 40.)
+        kd = full_config.get("control", {}).get("damping", {}).get("joint", 1.)
+        obs_scales = full_config["normalization"]["obs_scales"]
+        action_scale = full_config.get("control", {}).get("action_scale", 0.25)
+        clip_obs = full_config["normalization"]["clip_obs"]
+        clip_actions = full_config["normalization"]["clip_actions"]
         
     elif policy_source == "legged-loco":
-        # Hardware order: FR_hip(0), FR_thigh(1), FR_calf(2), FL_hip(3), FL_thigh(4), FL_calf(5), RR_hip(6), RR_thigh(7), RR_calf(8), RL_hip(9), RL_thigh(10), RL_calf(11)
+        config_path = osp.join(logdir, "params/env.yaml")
+        with open(config_path, "r") as f:
+            full_config = yaml.safe_load(f)
+
         # legged-loco uses grouped joint order: [all hips, all thighs, all calves]
         # isaaclab sim: FL_hip(0), FR_hip(1), RL_hip(2), RR_hip(3), FL_thigh(4), FR_thigh(5), RL_thigh(6), RR_thigh(7), FL_calf(8), FR_calf(9), RL_calf(10), RR_calf(11)
-        joint_map = [
-            3, 0, 9, 6,   # Hip joints: FL->3, FR->0, RL->9, RR->6  
-            4, 1, 10, 7,  # Thigh joints: FL->4, FR->1, RL->10, RR->7
-            5, 2, 11, 8   # Calf joints: FL->5, FR->2, RL->11, RR->8
-        ]
         joint_names = [
             "FL_hip_joint",     # 0
             "FR_hip_joint",     # 1  
@@ -242,44 +231,66 @@ def load_and_parse_configuration(logdir):
             "RL_calf_joint",    # 10
             "RR_calf_joint",    # 11
         ]
-        config_path = osp.join(logdir, "params/env.yaml")
-        with open(config_path, "r") as f:
-            full_config = yaml.safe_load(f)
-        
-        # legged-loco stores control parameters in different locations
-        actuator_config = full_config.get("scene", {}).get("robot", {}).get("actuators", {}).get("base_legs", {})
-        action_config = full_config.get("actions", {}).get("joint_pos", {})
-        init_state_config = full_config.get("scene", {}).get("robot", {}).get("init_state", {})
-        
-        # Extract joint positions from legged-loco config
-        default_joint_pos_dict = init_state_config.get("joint_pos", {})
-        
-        
-        # legged-loco does NOT use observation scaling (confirmed from training code)
-        config_params = {
-            "clip_observations": 100.0,  # Default fallback
-            "clip_actions": None,  # legged-loco doesn't have action clipping
-            "obs_scales": {
-                "ang_vel": 1.0,  # No scaling in legged-loco training
-                "dof_pos": 1.0,  # No scaling in legged-loco training
-                "dof_vel": 1.0   # No scaling in legged-loco training
-            },
-            "control_type": "P",  # Default for legged-loco
-            "stiffness": actuator_config.get("stiffness", 40.0),  # Default from legged-loco
-            "damping": actuator_config.get("damping", 1.0),      # Default from legged-loco
-            "action_scale": action_config.get("scale", 0.25),    # Default from legged-loco
-            "policy_source": policy_source
-        }
+        # joint_map = [
+        #     3, 0, 9, 6,   # Hip joints: FL->3, FR->0, RL->9, RR->6  
+        #     4, 1, 10, 7,  # Thigh joints: FL->4, FR->1, RL->10, RR->7
+        #     5, 2, 11, 8   # Calf joints: FL->5, FR->2, RL->11, RR->8
+        # ]
+        joint_map = get_joint_map_from_names(joint_names)
+        default_joint_pos_dict = full_config.get("scene", {}).get("robot", {}).get("init_state", {}).get("joint_pos", {})
+        default_joint_pos = parse_default_joint_pos(default_joint_pos_dict, joint_names)
+        kp = full_config.get("scene", {}).get("robot", {}).get("actuators", {}).get("base_legs", {}).get("stiffness", 40.0)
+        kd = full_config.get("scene", {}).get("robot", {}).get("actuators", {}).get("base_legs", {}).get("damping", 1.0)
+        obs_scales = {}
+        action_scale = full_config.get("actions", {}).get("joint_pos", {}).get("scale", 0.25)
+        clip_obs = 100.0
+        clip_actions = None
     else:
         raise ValueError(f"Unknown policy source: {policy_source}")
-    
-    # Set control cycle (fixed at 20ms, different from training)
+
+    # Set control cycle = dt * decimation = 0.005 * 4 = 0.02 (fixed at 20ms)
     duration = 0.02
 
-    config_params['joint_map'] = joint_map
-    config_params['default_joint_pos'] = parse_default_joint_pos(default_joint_pos_dict, joint_names)
+    return joint_map, default_joint_pos, kp, kd, obs_scales, action_scale, clip_obs, clip_actions, duration
+
+
+def get_joint_map_from_names(joint_names):
+    """
+    Generate joint map from simulation order to hardware order based on joint names.
     
-    return config_params, duration
+    Hardware order: FR_hip(0), FR_thigh(1), FR_calf(2), FL_hip(3), FL_thigh(4), FL_calf(5), 
+                   RR_hip(6), RR_thigh(7), RR_calf(8), RL_hip(9), RL_thigh(10), RL_calf(11)
+    
+    Args:
+        joint_names: List of joint names in simulation order
+        
+    Returns:
+        joint_map: List where each element is the hardware index for the corresponding simulation index
+    """
+    # Define hardware order mapping: joint_name -> hardware_index
+    hardware_order = {
+        "FR_hip_joint": 0,
+        "FR_thigh_joint": 1,
+        "FR_calf_joint": 2,
+        "FL_hip_joint": 3,
+        "FL_thigh_joint": 4,
+        "FL_calf_joint": 5,
+        "RR_hip_joint": 6,
+        "RR_thigh_joint": 7,
+        "RR_calf_joint": 8,
+        "RL_hip_joint": 9,
+        "RL_thigh_joint": 10,
+        "RL_calf_joint": 11,
+    }
+    
+    # Generate joint map: simulation_index -> hardware_index
+    joint_map = []
+    for joint_name in joint_names:
+        if joint_name not in hardware_order:
+            raise ValueError(f"Unknown joint name: {joint_name}. Valid joint names are: {list(hardware_order.keys())}")
+        joint_map.append(hardware_order[joint_name])
+    
+    return joint_map
 
 
 def parse_default_joint_pos(default_joint_pos_dict, joint_names):
@@ -696,17 +707,22 @@ def main(args):
     rclpy.init()
 
     # 1. Load and parse configuration
-    config_params, duration = load_and_parse_configuration(args.logdir)
+    joint_map, default_joint_pos, kp, kd, obs_scales, action_scale, clip_obs, clip_actions, duration = load_configuration(args.logdir)
     device = "cuda"
 
     # 2. Create ROS node with configuration parameters
     env_node = Go2ROS2Node(
-        joint_map=config_params['joint_map'],
-        default_joint_pos=config_params['default_joint_pos'],
+        joint_map=joint_map,
+        default_joint_pos=default_joint_pos,
         model_device=device,
         dryrun=not args.nodryrun,
         mode=args.mode,
-        **config_params  # Pass all config parameters directly
+        kp=kp,
+        kd=kd,
+        obs_scales=obs_scales,
+        action_scale=action_scale,
+        clip_obs=clip_obs,
+        clip_actions=clip_actions,
     )
 
     # 3. Print configuration information

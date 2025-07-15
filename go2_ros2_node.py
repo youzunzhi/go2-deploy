@@ -134,20 +134,18 @@ class Go2ROS2Node(Node):
         left =          0b1000000000000000 # 32768
 
     def __init__(self,
-        joint_map,
-        default_joint_pos,
+        joint_map: list,
+        default_joint_pos: list,
+        kp: float,
+        kd: float,
+        obs_scales: dict,
+        action_scale: float,
+        clip_obs: float,
+        clip_actions: float|None,
         low_state_topic="/lowstate",
         low_cmd_topic="/lowcmd",
         joy_stick_topic="/wirelesscontroller",
         depth_data_topic="/forward_depth_image",
-        # Configuration parameters that need to be passed in
-        clip_obs=100,
-        clip_actions=None,
-        obs_scales=None,
-        control_type=None,
-        kp=40.,
-        kd=1.,
-        action_scale=None,
         lin_vel_deadband=0.1,
         ang_vel_deadband=0.1,
         cmd_px_range=[0.4, 1.0], # check joy_stick_callback (p for positive, n for negative)
@@ -172,13 +170,12 @@ class Go2ROS2Node(Node):
         self.depth_data_topic = depth_data_topic
         
         # Store configuration parameters directly as attributes
-        self.clip_obs = clip_obs
-        self.clip_actions = clip_actions
-        self.obs_scales = obs_scales
-        self.control_type = control_type
         self.kp = kp
         self.kd = kd
+        self.obs_scales = obs_scales
         self.action_scale = action_scale
+        self.clip_obs = clip_obs
+        self.clip_actions = clip_actions
         self.default_joint_pos = torch.tensor(default_joint_pos, device=model_device, dtype=torch.float32)
         
         self.lin_vel_deadband = lin_vel_deadband
@@ -464,7 +461,7 @@ class Go2ROS2Node(Node):
     
     def _get_ang_vel_obs(self):
         ang_vel = torch.from_numpy(self.low_state_buffer.imu_state.gyroscope).unsqueeze(0).to(device=self.model_device, dtype=torch.float32)
-        return ang_vel * self.obs_scales["ang_vel"]
+        return ang_vel * self.obs_scales.get("ang_vel", 1.0)
     
     def _get_imu_obs(self):
         quat_xyzw = torch.tensor([
@@ -509,10 +506,10 @@ class Go2ROS2Node(Node):
             return torch.tensor([[0., 0., 0.]], device=self.model_device)
 
     def _get_dof_pos_obs(self):
-        return (self.dof_pos_ - self.default_joint_pos.unsqueeze(0)) * self.obs_scales["dof_pos"]
+        return (self.dof_pos_ - self.default_joint_pos.unsqueeze(0)) * self.obs_scales.get("dof_pos", 1.0)
 
     def _get_dof_vel_obs(self):
-        return self.dof_vel_ * self.obs_scales["dof_vel"]
+        return self.dof_vel_ * self.obs_scales.get("dof_vel", 1.0)
 
     def _get_last_actions_obs(self):
         return self.actions
@@ -659,16 +656,11 @@ class Go2ROS2Node(Node):
         
         self.actions = actions
 
-        # Check if clip_actions exists
         if self.clip_actions is not None:
-            # EPO clipping
             hard_clip = self.clip_actions / self.action_scale
-            clipped_scaled_action = torch.clip(actions, -hard_clip, hard_clip) * self.action_scale
-        else:
-            # legged-loco (no clipping)
-            clipped_scaled_action = actions * self.action_scale
-
-        robot_coordinates_action = clipped_scaled_action + self.default_joint_pos.unsqueeze(0)
+            actions = torch.clip(actions, -hard_clip, hard_clip)
+        scaled_actions = actions * self.action_scale
+        robot_coordinates_action = scaled_actions + self.default_joint_pos.unsqueeze(0)
         
         # Apply safety clipping using joint limits
         robot_coordinates_action = self.clip_actions_by_joint_limits(robot_coordinates_action)
