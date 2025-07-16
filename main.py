@@ -28,7 +28,7 @@ import threading
 
 from utils import load_configuration
 from utils.sport_mode_manager import SportModeManager
-from utils.obs import EPO_obs, LeggedLocoObs
+
 
 class Go2Runner:
     """Runner class for Go2 robot control system"""
@@ -36,13 +36,14 @@ class Go2Runner:
     def __init__(self, args):
         """Initialize the Go2 runner with configuration and models"""
         self.args = args
+        logdir = args.logdir
+        device = args.device
         rclpy.init()
         
-        # 1. Load and parse configuration
-        joint_map, default_joint_pos, kp, kd, obs_scales, action_scale, clip_obs, clip_actions, self.duration = load_configuration(args.logdir)
-        device = "cuda"
+        # Load and parse configuration
+        joint_map, default_joint_pos, kp, kd, action_scale, clip_obs, clip_actions, self.duration, self.policy_custom_manager = load_configuration(logdir, device)
 
-        # 2. Create ROS node with configuration parameters
+        # Create ROS node with configuration parameters
         self.handler = Go2Handler(
             joint_map=joint_map,
             default_joint_pos=default_joint_pos,
@@ -56,22 +57,31 @@ class Go2Runner:
             clip_actions=clip_actions,
         )
 
+        # Set handler to policy custom manager
+        self.policy_custom_manager.set_handler(self.handler)
+
         # Create SportModeManager instance
         self.sport_mode_manager = SportModeManager(self.handler)
-
-        self.obs_manager = EPO_obs(
         
-        # 3. Print configuration information
-        log_system_info(self.handler, args.logdir, self.duration)
+        # Print configuration information
+        self.log_system_info()
 
-        # 4. Load models and create inference functions
-        turn_obs, encode_depth, actor_model = setup_models(args.logdir, device)
-
-        # 5. Register models to node
-        self.handler.register_models(turn_obs=turn_obs, depth_encode=encode_depth, policy=actor_model)
         self.handler.start_ros_handlers()
         self.handler.warm_up()
-    
+
+    def main_loop(self):
+        """Main control loop for the Go2 robot - handles different operational modes based on joystick input"""
+        use_locomotion_policy = self.sport_mode_manager.sport_mode_before_locomotion()
+
+        if use_locomotion_policy:
+            action = self.policy_custom_manager.get_action()
+            self.handler.send_action(action)
+            self.handler.global_counter += 1
+
+        if self.sport_mode_manager.sport_mode_after_locomotion():
+            self.handler.log_info("L2 pressed, stop using locomotion policy, switch back to sport mode.")
+
+    @torch.inference_mode()
     def run(self):
         """Run the main control loop"""
         try:
@@ -117,104 +127,19 @@ class Go2Runner:
         else:
             raise ValueError(f"Invalid timing mode: {self.args.timing_mode}")
     
-    def main_loop(self):
-        """Main control loop for the Go2 robot - handles different operational modes based on joystick input"""
-        use_locomotion_policy = self.sport_mode_manager.sport_mode_before_locomotion()
-
-        if use_locomotion_policy:
-            obs = 
-            action = self.handler.policy(obs)
-            self.handler.send_action(action)
-            self.handler.global_counter += 1
-
-        if self.sport_mode_manager.sport_mode_after_locomotion():
-            self.handler.log_info("L2 pressed, stop using locomotion policy, switch back to sport mode.")
-
-def log_system_info(handler, logdir, duration):
-    """
-    Print system configuration information
-    
-    Args:
-        handler: Go2 Handler
-        logdir: Model directory
-        duration: Control cycle
-    """
-    handler.log_info("Model loaded from: {}".format(osp.join(logdir)))
-    handler.log_info("Control Duration: {} sec".format(duration))
-    handler.log_info("Motor Stiffness (kp): {}".format(handler.kp))
-    handler.log_info("Motor Damping (kd): {}".format(handler.kd))
-
-
-# def setup_models(logdir, device):
-#     """
-#     Unified setup of models and inference functions
-    
-#     Args:
-#         logdir: Model file directory
-#         device: Computing device
+    def log_system_info(self):
+        """
+        Print system configuration information
         
-#     Returns:
-#         turn_obs: Observation processing function
-#         encode_depth: Depth encoding function
-#         actor_model: Policy function
-#     """
-#     # Determine policy source from logdir structure
-#     policy_source = determine_policy_source(logdir)
-    
-#     if policy_source == "EPO":
-#         # EPO: Load separate base model and vision model
-#         base_model, estimator, hist_encoder, actor = load_base_model(logdir, device)
-#         depth_encoder = load_vision_model(logdir, device)
-        
-#         # Create inference functions for EPO
-#         turn_obs = create_observation_processor(estimator, hist_encoder)
-#         encode_depth = create_depth_encoder(depth_encoder)
-#         actor_model = create_policy(actor)
-        
-#     elif policy_source == "legged-loco":
-#         # legged-loco: Load single JIT policy
-#         policy = load_legged_loco_policy(logdir, device)
-        
-#         # Create inference functions for legged-loco
-#         turn_obs = create_legged_loco_observation_processor()
-#         encode_depth = create_dummy_depth_encoder()  # No vision in base policy
-#         actor_model = create_legged_loco_policy_function(policy)
-        
-#     else:
-#         raise ValueError(f"Unsupported policy source: {policy_source}")
-    
-#     return turn_obs, encode_depth, actor_model
-
-
-def load_legged_loco_policy(logdir, device):
-    """
-    Load legged-loco policy (single JIT model)
-    
-    Args:
-        logdir: Model file directory
-        device: Computing device
-        
-    Returns:
-        policy: Loaded policy model
-    """
-    policy_path = os.path.join(logdir, 'policy.jit')
-    
-    if not os.path.exists(policy_path):
-        raise FileNotFoundError(f"Policy file not found: {policy_path}")
-    
-    # Load JIT policy
-    policy = torch.jit.load(policy_path, map_location=device)
-    policy.eval()
-    
-    return policy
-
-
-@torch.inference_mode()
-def main(args):
-    """Main entry point using Go2Runner class"""
-    runner = Go2Runner(args)
-    runner.run()
-
+        Args:
+            handler: Go2 Handler
+            logdir: Model directory
+            duration: Control cycle
+        """
+        self.handler.log_info("Model loaded from: {}".format(osp.join(self.args.logdir)))
+        self.handler.log_info("Control Duration: {} sec".format(self.duration))
+        self.handler.log_info("Motor Stiffness (kp): {}".format(self.handler.kp))
+        self.handler.log_info("Motor Damping (kd): {}".format(self.handler.kd))
 
 if __name__ == "__main__":
     import argparse
@@ -226,7 +151,6 @@ if __name__ == "__main__":
         choices=["manual_control", "ros_timer"],
         help="Select timing mode: manual_control (precise timing control) or ros_timer (ROS managed timer)",
     )
-    parser.add_argument("--mode", type=str, default="locomotion", choices=["locomotion", "walk"])
     args = parser.parse_args()
     
-    main(args)
+    Go2Runner(args).run()

@@ -3,8 +3,10 @@ import json
 from collections import OrderedDict
 import yaml
 import re
+from utils.model_and_obs.EPO import EPOCustomManager
+from utils.model_and_obs.legged_loco import LeggedLocoCustomManager
 
-def load_configuration(logdir):
+def load_configuration(logdir, device):
     """
     Load configuration parameters from files and extract them for Go2Handler initialization
     
@@ -17,14 +19,6 @@ def load_configuration(logdir):
     """
     
     if "EPO" in logdir:
-        policy_source = "EPO"
-    elif "legged-loco" in logdir:
-        policy_source = "legged-loco"
-    else:
-        raise ValueError(f"Unknown policy source: {logdir}")
-        
-    # Extract the necessary parameters for Go2Handler
-    if policy_source == "EPO":
         config_path = osp.join(logdir, "config.json")
         with open(config_path, "r") as f:
             full_config = json.load(f, object_pairs_hook=OrderedDict)
@@ -44,18 +38,23 @@ def load_configuration(logdir):
             "RL_thigh_joint",   # 10
             "RL_calf_joint",    # 11
         ]
-        obs_sources = ["proprio", "depth"]
         joint_map = get_joint_map_from_names(joint_names)
         default_joint_pos_dict = full_config.get("init_state", {}).get("default_joint_angles", {})
         default_joint_pos = parse_default_joint_pos_dict(default_joint_pos_dict, joint_names)
         kp = full_config.get("control", {}).get("stiffness", {}).get("joint", 40.)
         kd = full_config.get("control", {}).get("damping", {}).get("joint", 1.)
-        obs_scales = full_config["normalization"]["obs_scales"]
         action_scale = full_config.get("control", {}).get("action_scale", 0.25)
         clip_obs = full_config["normalization"]["clip_obs"]
         clip_actions = full_config["normalization"]["clip_actions"]
+
+        n_hist_len = full_config["env"]["history_len"]
+        n_proprio = full_config["env"]["n_proprio"]
+        obs_scales = full_config["normalization"]["obs_scales"]
+
+        custom_manager = EPOCustomManager(logdir, device, n_hist_len, n_proprio, obs_scales)
+
         
-    elif policy_source == "legged-loco":
+    elif "legged-loco" in logdir:
         config_path = osp.join(logdir, "params/env.yaml")
         with open(config_path, "r") as f:
             full_config = yaml.safe_load(f)
@@ -86,17 +85,18 @@ def load_configuration(logdir):
         default_joint_pos = parse_default_joint_pos_dict(default_joint_pos_dict, joint_names)
         kp = full_config.get("scene", {}).get("robot", {}).get("actuators", {}).get("base_legs", {}).get("stiffness", 40.0)
         kd = full_config.get("scene", {}).get("robot", {}).get("actuators", {}).get("base_legs", {}).get("damping", 1.0)
-        obs_scales = {}
         action_scale = full_config.get("actions", {}).get("joint_pos", {}).get("scale", 0.25)
         clip_obs = 100.0
         clip_actions = None
+
+        custom_manager = LeggedLocoCustomManager(logdir, device)
     else:
-        raise ValueError(f"Unknown policy source: {policy_source}")
+        raise ValueError(f"Unknown policy source: {logdir}")
 
     # Set control cycle = dt * decimation = 0.005 * 4 = 0.02 (fixed at 20ms)
     duration = 0.02
 
-    return joint_map, default_joint_pos, kp, kd, obs_scales, action_scale, clip_obs, clip_actions, duration
+    return joint_map, default_joint_pos, kp, kd, action_scale, clip_obs, clip_actions, duration, custom_manager
 
 
 def get_joint_map_from_names(joint_names):
