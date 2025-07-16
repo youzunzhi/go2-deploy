@@ -1,31 +1,10 @@
 import rclpy
-from rclpy.node import Node
-from go2_ros2_node import Go2ROS2Handler, get_euler_xyz
 
-import os
-import ast
 import os.path as osp
 import time
-from collections import OrderedDict
-from copy import deepcopy
-import numpy as np
 import torch
-import torch.nn.functional as F
-from torch.autograd import Variable
-from torch import nn
-import torch.jit
-import yaml
-import re
 
-from rsl_rl import modules
-from rsl_rl.modules import StateHistoryEncoder, RecurrentDepthBackbone, DepthOnlyFCBackbone58x87
-import cv2
-
-import sys
-import time
-import sys
-import threading
-
+from go2_ros2_handler import Go2ROS2Handler
 from policy_interface import get_policy_interface
 from utils.sport_mode_manager import SportModeManager
 
