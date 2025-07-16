@@ -1,4 +1,5 @@
 import os, sys
+from typing import Optional
 
 import rclpy
 from rclpy.node import Node
@@ -31,13 +32,12 @@ import torch
 import time
 
 
-@torch.jit.script
-def copysign(a, b):
-    # type: (float, Tensor) -> Tensor
-    a = torch.tensor(a, device=b.device, dtype=torch.float).repeat(b.shape[0])
-    return torch.abs(a) * torch.sign(b)
+@torch.jit.script  # type: ignore
+def copysign(a: float, b: torch.Tensor) -> torch.Tensor:
+    a = torch.tensor(a, device=b.device, dtype=torch.float).repeat(b.shape[0])  # type: ignore
+    return torch.abs(a) * torch.sign(b)  # type: ignore
 
-@torch.jit.script
+@torch.jit.script  # type: ignore
 def get_euler_xyz(q):
     qx, qy, qz, qw = 0, 1, 2, 3
     # roll (x-axis rotation)
@@ -113,7 +113,7 @@ class Go2RobotCfgs:
     
     
 
-class Go2Handler:
+class Go2ROS2Handler:
     class WirelessButtons:
         R1 =            0b00000001 # 1
         L1 =            0b00000010 # 2
@@ -139,7 +139,7 @@ class Go2Handler:
         kd: float,
         action_scale: float,
         clip_obs: float,
-        clip_actions: float|None,
+        clip_actions: Optional[float],
         low_state_topic="/lowstate",
         low_cmd_topic="/lowcmd",
         joy_stick_topic="/wirelesscontroller",

@@ -1,22 +1,26 @@
 import torch
 import torch.nn as nn
 import os
-from utils.model_and_obs import BasePolicyCustomManager
+from utils.model_and_obs import BasePolicyInterface
+from collections import OrderedDict
+import json
+import os.path as osp
+from utils.config import get_joint_map_from_names, parse_default_joint_pos_dict
 
-
-class EPOCustomManager(BasePolicyCustomManager):
-    def __init__(self, logdir, device, n_hist_len, n_proprio, obs_scales):
+class EPOPolicyInterface(BasePolicyInterface):
+    def __init__(self, logdir, device):
         super().__init__(logdir, device)
-        estimator, hist_encoder = self.load_base_model()
-        depth_encoder = self.load_vision_model()
-        self.obs_manager = EPO_obs(device, depth_encoder, estimator, hist_encoder, n_hist_len, n_proprio, obs_scales)
-    
+        self._load_configs()
+        estimator, hist_encoder = self._load_base_model()
+        depth_encoder = self._load_vision_model()
+        self.obs_manager = ObsManager(device, depth_encoder, estimator, hist_encoder, self.n_hist_len, self.n_proprio, self.obs_scales)
+
     def get_action(self):
-        obs = self.get_obs()
-        action = self.get_action_from_obs(obs)
+        obs = self._get_obs()
+        action = self._get_action_from_obs(obs)
         return action
     
-    def get_obs(self):
+    def _get_obs(self):
         assert self.handler is not None, "Handler is not set"
         global_counter = self.handler.global_counter
         depth_image = self.handler._get_depth_image()
@@ -28,10 +32,10 @@ class EPOCustomManager(BasePolicyCustomManager):
         contact = self.handler._get_contact_filt_obs()
         return self.obs_manager.get_obs(global_counter, depth_image, ang_vel, base_rpy, dof_pos, dof_vel, last_actions, contact)
     
-    def get_action_from_obs(self, obs):
+    def _get_action_from_obs(self, obs):
         return self.actor(obs)
 
-    def load_base_model(self):
+    def _load_base_model(self):
         base_model_name = 'base_jit.pt'
         base_model_path = os.path.join(self.logdir, base_model_name)
         
@@ -46,7 +50,7 @@ class EPOCustomManager(BasePolicyCustomManager):
         
         return estimator, hist_encoder
 
-    def load_vision_model(self):
+    def _load_vision_model(self):
         """
         Load vision model (depth encoder)
         
@@ -74,8 +78,41 @@ class EPOCustomManager(BasePolicyCustomManager):
         
         return depth_encoder
 
+    def _load_configs(self):
+        config_path = osp.join(self.logdir, "config.json")
+        with open(config_path, "r") as f:
+            full_config = json.load(f, object_pairs_hook=OrderedDict)
 
-class EPO_obs:
+        # EPO uses identity mapping (simulation order already matches hardware)
+        joint_names = [
+            "FR_hip_joint",     # 0
+            "FR_thigh_joint",   # 1
+            "FR_calf_joint",    # 2
+            "FL_hip_joint",     # 3
+            "FL_thigh_joint",   # 4
+            "FL_calf_joint",    # 5
+            "RR_hip_joint",     # 6
+            "RR_thigh_joint",   # 7
+            "RR_calf_joint",    # 8
+            "RL_hip_joint",     # 9
+            "RL_thigh_joint",   # 10
+            "RL_calf_joint",    # 11
+        ]
+        self.joint_map = get_joint_map_from_names(joint_names)
+        default_joint_pos_dict = full_config.get("init_state", {}).get("default_joint_angles", {})
+        self.default_joint_pos = parse_default_joint_pos_dict(default_joint_pos_dict, joint_names)
+        self.kp = full_config.get("control", {}).get("stiffness", {}).get("joint", 40.)
+        self.kd = full_config.get("control", {}).get("damping", {}).get("joint", 1.)
+        self.action_scale = full_config.get("control", {}).get("action_scale", 0.25)
+        self.clip_obs = full_config["normalization"]["clip_obs"]
+        self.clip_actions = full_config["normalization"]["clip_actions"]
+
+        self.n_hist_len = full_config["env"]["history_len"]
+        self.n_proprio = full_config["env"]["n_proprio"]
+        self.obs_scales = full_config["normalization"]["obs_scales"]
+
+
+class ObsManager:
     def __init__(self, device, depth_encoder, estimator, hist_encoder, n_hist_len, n_proprio, obs_scales):
         self.device = device
         self.depth_encoder = depth_encoder

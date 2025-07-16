@@ -1,6 +1,6 @@
 import rclpy
 from rclpy.node import Node
-from go2_ros2_node import Go2Handler, get_euler_xyz
+from go2_ros2_node import Go2ROS2Handler, get_euler_xyz
 
 import os
 import ast
@@ -26,7 +26,7 @@ import time
 import sys
 import threading
 
-from utils import load_configuration
+from policy_interface import get_policy_interface
 from utils.sport_mode_manager import SportModeManager
 
 
@@ -38,13 +38,16 @@ class Go2Runner:
         self.args = args
         logdir = args.logdir
         device = args.device
+        self.duration = args.duration
+
         rclpy.init()
         
-        # Load and parse configuration
-        joint_map, default_joint_pos, kp, kd, action_scale, clip_obs, clip_actions, self.duration, self.policy_custom_manager = load_configuration(logdir, device)
+        self.policy_interface = get_policy_interface(logdir, device)
 
-        # Create ROS node with configuration parameters
-        self.handler = Go2Handler(
+        # Get configs for handler
+        joint_map, default_joint_pos, kp, kd, action_scale, clip_obs, clip_actions = self.policy_interface.get_configs_for_handler()
+
+        self.handler = Go2ROS2Handler(
             joint_map=joint_map,
             default_joint_pos=default_joint_pos,
             device=device,
@@ -57,10 +60,9 @@ class Go2Runner:
             clip_actions=clip_actions,
         )
 
-        # Set handler to policy custom manager
-        self.policy_custom_manager.set_handler(self.handler)
+        # Set handler to policy interface
+        self.policy_interface.set_handler(self.handler)
 
-        # Create SportModeManager instance
         self.sport_mode_manager = SportModeManager(self.handler)
         
         # Print configuration information
@@ -74,7 +76,7 @@ class Go2Runner:
         use_locomotion_policy = self.sport_mode_manager.sport_mode_before_locomotion()
 
         if use_locomotion_policy:
-            action = self.policy_custom_manager.get_action()
+            action = self.policy_interface.get_action()
             self.handler.send_action(action)
             self.handler.global_counter += 1
 
@@ -134,12 +136,11 @@ class Go2Runner:
         Args:
             handler: Go2 Handler
             logdir: Model directory
-            duration: Control cycle
         """
         self.handler.log_info("Model loaded from: {}".format(osp.join(self.args.logdir)))
-        self.handler.log_info("Control Duration: {} sec".format(self.duration))
         self.handler.log_info("Motor Stiffness (kp): {}".format(self.handler.kp))
         self.handler.log_info("Motor Damping (kd): {}".format(self.handler.kd))
+
 
 if __name__ == "__main__":
     import argparse
@@ -151,6 +152,8 @@ if __name__ == "__main__":
         choices=["manual_control", "ros_timer"],
         help="Select timing mode: manual_control (precise timing control) or ros_timer (ROS managed timer)",
     )
+    parser.add_argument("--device", type=str, default="cuda", help="Device to use for the model")
+    parser.add_argument("--duration", type=float, default=0.02, help="Control cycle duration")
     args = parser.parse_args()
     
     Go2Runner(args).run()
