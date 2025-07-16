@@ -28,135 +28,107 @@ import threading
 
 from utils import load_configuration
 from utils.sport_mode_manager import SportModeManager
+from utils.obs import EPO_obs, LeggedLocoObs
 
-
-def start_main_loop_timer(handler, duration):
-    """Start the main loop timer for ROS-based timing control"""
-    handler.main_loop_timer = handler.node.create_timer(
-        duration, # in sec
-        lambda: main_loop(handler),
-    )
+class Go2Runner:
+    """Runner class for Go2 robot control system"""
     
-def handle_timing_mode(handler, timing_mode, duration):
-    if timing_mode == "ros_timer":
-        # Use ROS timer for timing control
-        handler.log_info('Model and Policy are ready')
-        start_main_loop_timer(handler, duration)
-        rclpy.spin(handler.node)
-    
-    elif timing_mode == "manual_control":
-        # Manually control timing for more precise control
-        rclpy.spin_once(handler.node, timeout_sec=0.)
-        handler.log_info("Model and Policy are ready")
+    def __init__(self, args):
+        """Initialize the Go2 runner with configuration and models"""
+        self.args = args
+        rclpy.init()
         
-        while rclpy.ok():
-            # Track iteration time to maintain desired frequency
-            main_loop_time = time.monotonic()
+        # 1. Load and parse configuration
+        joint_map, default_joint_pos, kp, kd, obs_scales, action_scale, clip_obs, clip_actions, self.duration = load_configuration(args.logdir)
+        device = "cuda"
+
+        # 2. Create ROS node with configuration parameters
+        self.handler = Go2Handler(
+            joint_map=joint_map,
+            default_joint_pos=default_joint_pos,
+            device=device,
+            dryrun=not args.nodryrun,
+            mode=args.mode,
+            kp=kp,
+            kd=kd,
+            action_scale=action_scale,
+            clip_obs=clip_obs,
+            clip_actions=clip_actions,
+        )
+
+        # Create SportModeManager instance
+        self.sport_mode_manager = SportModeManager(self.handler)
+
+        self.obs_manager = EPO_obs(
+        
+        # 3. Print configuration information
+        log_system_info(self.handler, args.logdir, self.duration)
+
+        # 4. Load models and create inference functions
+        turn_obs, encode_depth, actor_model = setup_models(args.logdir, device)
+
+        # 5. Register models to node
+        self.handler.register_models(turn_obs=turn_obs, depth_encode=encode_depth, policy=actor_model)
+        self.handler.start_ros_handlers()
+        self.handler.warm_up()
+    
+    def run(self):
+        """Run the main control loop"""
+        try:
+            # Start control loop
+            self._handle_timing_mode()
+        finally:
+            # Shutdown properly
+            self.handler.shutdown()
+            rclpy.shutdown()
+    
+    def _start_main_loop_timer(self):
+        """Start the main loop timer for ROS-based timing control"""
+        self.handler.main_loop_timer = self.handler.node.create_timer(
+            self.duration, # in sec
+            self.main_loop,
+        )
+    
+    def _handle_timing_mode(self):
+        """Handle different timing modes for the control loop"""
+        if self.args.timing_mode == "ros_timer":
+            # Use ROS timer for timing control
+            self.handler.log_info('Model and Policy are ready')
+            self._start_main_loop_timer()
+            rclpy.spin(self.handler.node)
+        
+        elif self.args.timing_mode == "manual_control":
+            # Manually control timing for more precise control
+            rclpy.spin_once(self.handler.node, timeout_sec=0.)
+            self.handler.log_info("Model and Policy are ready")
             
-            # Run one iteration
-            main_loop(handler)
-            rclpy.spin_once(handler.node, timeout_sec=0.)
-            
-            # Sleep remaining time to maintain frequency
-            sleep_time = max(0, duration - (time.monotonic() - main_loop_time))
-            time.sleep(sleep_time)
+            while rclpy.ok():
+                # Track iteration time to maintain desired frequency
+                main_loop_time = time.monotonic()
+                
+                # Run one iteration
+                self.main_loop()
+                rclpy.spin_once(self.handler.node, timeout_sec=0.)
+                
+                # Sleep remaining time to maintain frequency
+                sleep_time = max(0, self.duration - (time.monotonic() - main_loop_time))
+                time.sleep(sleep_time)
+        
+        else:
+            raise ValueError(f"Invalid timing mode: {self.args.timing_mode}")
     
-    else:
-        raise ValueError(f"Invalid timing mode: {timing_mode}")
+    def main_loop(self):
+        """Main control loop for the Go2 robot - handles different operational modes based on joystick input"""
+        use_locomotion_policy = self.sport_mode_manager.sport_mode_before_locomotion()
 
+        if use_locomotion_policy:
+            obs = 
+            action = self.handler.policy(obs)
+            self.handler.send_action(action)
+            self.handler.global_counter += 1
 
-def main_loop(handler: Go2Handler):
-    """Main control loop for the Go2 robot - handles different operational modes based on joystick input"""
-    # Create SportModeManager instance
-    sport_mode_manager = SportModeManager(handler)
-    
-    use_locomotion_policy = sport_mode_manager.sport_mode_before_locomotion()
-
-    if use_locomotion_policy:
-        # Handle X button for legged-loco policy - set forward command
-        if (handler.joy_stick_buffer.keys & handler.WirelessButtons.X):
-            if handler.policy_source == "legged-loco":
-                handler.log_info("X pressed, setting legged-loco command to [0.4, 0, 0]")
-                handler.xyyaw_command = torch.tensor([[0.4, 0.0, 0.0]], device=handler.device, dtype=torch.float32)
-        
-        proprio = handler.get_proprio()
-        proprio_history = handler._get_history_proprio()
-        if handler.global_counter % handler.visual_update_interval == 0:
-            depth_image = handler._get_depth_image()
-            if handler.global_counter == 0:
-                handler.last_depth_image = depth_image
-            handler.depth_latent_yaw = handler.depth_encode(handler.last_depth_image, proprio)
-            handler.last_depth_image = depth_image
-
-        obs = handler.turn_obs(proprio, handler.depth_latent_yaw, proprio_history, handler.n_proprio, handler.n_depth_latent, handler.n_hist_len)
-
-        action = handler.policy(obs)
-
-        handler.send_action(action)
-
-        handler.global_counter += 1
-
-    if sport_mode_manager.sport_mode_after_locomotion():
-        handler.log_info("L2 pressed, stop using locomotion policy, switch back to sport mode.")
-
-
-def create_depth_encoder(depth_encoder):
-    """
-    Create depth encoding function
-    
-    Args:
-        depth_encoder: Depth encoder model
-        
-    Returns:
-        encode_depth: Depth encoding function
-    """
-    def encode_depth(depth_image, proprio):
-        """
-        Encode depth image into feature vector
-        
-        Args:
-            depth_image: Depth image
-            proprio: Proprioceptive data
-            
-        Returns:
-            depth_latent_yaw: Depth features and yaw angle
-        """
-        depth_latent_yaw = depth_encoder(depth_image, proprio)
-        
-        # Check for NaN values
-        if torch.isnan(depth_latent_yaw).any():
-            print('depth_latent_yaw contains nan and the depth image is: ', depth_image)
-        
-        return depth_latent_yaw
-    
-    return encode_depth
-
-
-def create_policy(actor):
-    """
-    Create policy function
-    
-    Args:
-        actor: Action generator
-        
-    Returns:
-        actor_model: Policy function
-    """
-    def actor_model(obs):
-        """
-        Generate action based on observation
-        
-        Args:
-            obs: Observation vector
-            
-        Returns:
-            action: Action vector
-        """
-        action = actor(obs)
-        return action
-    
-    return actor_model
-
+        if self.sport_mode_manager.sport_mode_after_locomotion():
+            self.handler.log_info("L2 pressed, stop using locomotion policy, switch back to sport mode.")
 
 def log_system_info(handler, logdir, duration):
     """
@@ -173,45 +145,45 @@ def log_system_info(handler, logdir, duration):
     handler.log_info("Motor Damping (kd): {}".format(handler.kd))
 
 
-def setup_models(logdir, device):
-    """
-    Unified setup of models and inference functions
+# def setup_models(logdir, device):
+#     """
+#     Unified setup of models and inference functions
     
-    Args:
-        logdir: Model file directory
-        device: Computing device
+#     Args:
+#         logdir: Model file directory
+#         device: Computing device
         
-    Returns:
-        turn_obs: Observation processing function
-        encode_depth: Depth encoding function
-        actor_model: Policy function
-    """
-    # Determine policy source from logdir structure
-    policy_source = determine_policy_source(logdir)
+#     Returns:
+#         turn_obs: Observation processing function
+#         encode_depth: Depth encoding function
+#         actor_model: Policy function
+#     """
+#     # Determine policy source from logdir structure
+#     policy_source = determine_policy_source(logdir)
     
-    if policy_source == "EPO":
-        # EPO: Load separate base model and vision model
-        base_model, estimator, hist_encoder, actor = load_base_model(logdir, device)
-        depth_encoder = load_vision_model(logdir, device)
+#     if policy_source == "EPO":
+#         # EPO: Load separate base model and vision model
+#         base_model, estimator, hist_encoder, actor = load_base_model(logdir, device)
+#         depth_encoder = load_vision_model(logdir, device)
         
-        # Create inference functions for EPO
-        turn_obs = create_observation_processor(estimator, hist_encoder)
-        encode_depth = create_depth_encoder(depth_encoder)
-        actor_model = create_policy(actor)
+#         # Create inference functions for EPO
+#         turn_obs = create_observation_processor(estimator, hist_encoder)
+#         encode_depth = create_depth_encoder(depth_encoder)
+#         actor_model = create_policy(actor)
         
-    elif policy_source == "legged-loco":
-        # legged-loco: Load single JIT policy
-        policy = load_legged_loco_policy(logdir, device)
+#     elif policy_source == "legged-loco":
+#         # legged-loco: Load single JIT policy
+#         policy = load_legged_loco_policy(logdir, device)
         
-        # Create inference functions for legged-loco
-        turn_obs = create_legged_loco_observation_processor()
-        encode_depth = create_dummy_depth_encoder()  # No vision in base policy
-        actor_model = create_legged_loco_policy_function(policy)
+#         # Create inference functions for legged-loco
+#         turn_obs = create_legged_loco_observation_processor()
+#         encode_depth = create_dummy_depth_encoder()  # No vision in base policy
+#         actor_model = create_legged_loco_policy_function(policy)
         
-    else:
-        raise ValueError(f"Unsupported policy source: {policy_source}")
+#     else:
+#         raise ValueError(f"Unsupported policy source: {policy_source}")
     
-    return turn_obs, encode_depth, actor_model
+#     return turn_obs, encode_depth, actor_model
 
 
 def load_legged_loco_policy(logdir, device):
@@ -237,136 +209,11 @@ def load_legged_loco_policy(logdir, device):
     return policy
 
 
-def create_legged_loco_observation_processor():
-    """
-    Create observation processing function for legged-loco policy
-    
-    Returns:
-        turn_obs: Observation processing function
-    """
-    def turn_obs(proprio, depth_latent_yaw, proprio_history, n_proprio, n_depth_latent, n_hist_len):
-        """
-        Process observations for legged-loco policy
-        
-        Args:
-            proprio: Current proprioceptive data [batch_size, 45]
-            depth_latent_yaw: Depth features (unused for base policy)
-            proprio_history: Historical proprioceptive data [batch_size, hist_len, 45]
-            n_proprio: Proprioceptive data dimension (45)
-            n_depth_latent: Depth feature dimension (unused)
-            n_hist_len: History length (9)
-            
-        Returns:
-            obs: Processed observation vector [batch_size, 450]
-        """
-        # legged-loco expects: [current_obs, hist_obs_t-1, hist_obs_t-2, ..., hist_obs_t-9]
-        # Shape: [batch_size, 45 * 10] = [batch_size, 450]
-        
-        # Reshape history: [batch_size, hist_len, n_proprio] -> [batch_size, hist_len * n_proprio]
-        flattened_history = proprio_history.view(proprio_history.shape[0], -1)
-        
-        # Concatenate current observation with flattened history
-        obs = torch.cat([proprio, flattened_history], dim=-1)
-        
-        return obs
-    
-    return turn_obs
-
-
-def create_dummy_depth_encoder():
-    """
-    Create dummy depth encoder for legged-loco base policy (no vision)
-    
-    Returns:
-        encode_depth: Dummy depth encoding function
-    """
-    def encode_depth(depth_image, proprio):
-        """
-        Dummy depth encoding function - returns zeros for base policy
-        
-        Args:
-            depth_image: Depth image (unused)
-            proprio: Proprioceptive data
-            
-        Returns:
-            depth_latent_yaw: Dummy depth features (zeros)
-        """
-        batch_size = proprio.shape[0]
-        device = proprio.device
-        
-        # Return zeros for depth features (32) + yaw (2) = 34 dimensions
-        dummy_depth_latent_yaw = torch.zeros(batch_size, 34, device=device, dtype=torch.float32)
-        
-        return dummy_depth_latent_yaw
-    
-    return encode_depth
-
-
-def create_legged_loco_policy_function(policy):
-    """
-    Create policy function for legged-loco
-    
-    Args:
-        policy: Loaded JIT policy
-        
-    Returns:
-        actor_model: Policy function
-    """
-    def actor_model(obs):
-        """
-        Generate action using legged-loco policy
-        
-        Args:
-            obs: Observation vector [batch_size, 450]
-            
-        Returns:
-            action: Action vector [batch_size, 12]
-        """
-        action = policy(obs)
-        return action
-    
-    return actor_model
-
-
 @torch.inference_mode()
 def main(args):
-    rclpy.init()
-
-    # 1. Load and parse configuration
-    joint_map, default_joint_pos, kp, kd, obs_scales, action_scale, clip_obs, clip_actions, duration = load_configuration(args.logdir)
-    device = "cuda"
-
-    # 2. Create ROS node with configuration parameters
-    handler = Go2Handler(
-        joint_map=joint_map,
-        default_joint_pos=default_joint_pos,
-        device=device,
-        dryrun=not args.nodryrun,
-        mode=args.mode,
-        kp=kp,
-        kd=kd,
-        action_scale=action_scale,
-        clip_obs=clip_obs,
-        clip_actions=clip_actions,
-    )
-
-    # 3. Print configuration information
-    log_system_info(handler, args.logdir, duration)
-
-    # 4. Load models and create inference functions
-    turn_obs, encode_depth, actor_model = setup_models(args.logdir, device)
-
-    # 5. Register models to node
-    handler.register_models(turn_obs=turn_obs, depth_encode=encode_depth, policy=actor_model)
-    handler.start_ros_handlers()
-    handler.warm_up()
-
-    # 6. Start control loop
-    handle_timing_mode(handler, args.timing_mode, duration)
-
-    # 7. Shutdown properly
-    handler.shutdown()
-    rclpy.shutdown()
+    """Main entry point using Go2Runner class"""
+    runner = Go2Runner(args)
+    runner.run()
 
 
 if __name__ == "__main__":

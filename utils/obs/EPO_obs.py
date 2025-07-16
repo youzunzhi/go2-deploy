@@ -27,7 +27,7 @@ class EPO_obs:
 
         self.activation = nn.ELU()
 
-    def get_EPO_obs(self, global_counter, depth_image, ang_vel, base_rpy, dof_pos, dof_vel, last_actions, contact):
+    def get_obs(self, global_counter, depth_image, ang_vel, base_rpy, dof_pos, dof_vel, last_actions, contact):
         proprio = self.get_proprio(ang_vel, base_rpy, dof_pos, dof_vel, last_actions, contact)
         if global_counter % self.visual_update_interval == 0:
             if global_counter == 0:
