@@ -140,26 +140,14 @@ class Go2ROS2Handler:
         action_scale: float,
         clip_obs: float,
         clip_actions: Optional[float],
-        low_state_topic="/lowstate",
-        low_cmd_topic="/lowcmd",
-        joy_stick_topic="/wirelesscontroller",
-        depth_data_topic="/forward_depth_image",
-        lin_vel_deadband=0.1,
-        ang_vel_deadband=0.1,
-        cmd_px_range=[0.4, 1.0], # check joy_stick_callback (p for positive, n for negative)
-        cmd_nx_range=[0.4, 0.8], # check joy_stick_callback (p for positive, n for negative)
-        cmd_py_range=[0.4, 0.8], # check joy_stick_callback (p for positive, n for negative)
-        cmd_ny_range=[0.4, 0.8], # check joy_stick_callback (p for positive, n for negative)
-        cmd_pyaw_range=[0.4, 1.6], # check joy_stick_callback (p for positive, n for negative)
-        cmd_nyaw_range=[0.4, 1.6], # check joy_stick_callback (p for positive, n for negative)
-        move_by_wireless_remote=True, # if True, the robot will be controlled by a wireless remote
         device="cpu",
         dof_pos_protect_ratio=1.1, # if the dof_pos is out of the range of this ratio, the process will shutdown.
-        robot_class_name="Go2",
         dryrun=True, # if True, the robot will not send commands to the real robot
         mode="locomotion",
         policy_source="EPO", # Policy source: "EPO" or "legged-loco"
     ):
+        self.device = device
+        
         # Create ROS2 node instance using composition
         self.node = rclpy.create_node("unitree_ros2_real")
 
@@ -172,22 +160,11 @@ class Go2ROS2Handler:
         self.clip_obs = clip_obs
         self.clip_actions = clip_actions
 
-        self.low_state_topic = low_state_topic
-        self.low_cmd_topic = low_cmd_topic if not dryrun else low_cmd_topic + "_dryrun_" + str(np.random.randint(0, 65535))
-        self.joy_stick_topic = joy_stick_topic
-        self.depth_data_topic = depth_data_topic
-        self.lin_vel_deadband = lin_vel_deadband
-        self.ang_vel_deadband = ang_vel_deadband
-        self.cmd_px_range = cmd_px_range
-        self.cmd_nx_range = cmd_nx_range
-        self.cmd_py_range = cmd_py_range
-        self.cmd_ny_range = cmd_ny_range
-        self.cmd_pyaw_range = cmd_pyaw_range
-        self.cmd_nyaw_range = cmd_nyaw_range
-        self.move_by_wireless_remote = move_by_wireless_remote
-        self.device = device
-        self.dof_pos_protect_ratio = dof_pos_protect_ratio
-        self.robot_class_name = robot_class_name
+        self.low_state_topic = "/lowstate"
+        self.low_cmd_topic = "/lowcmd" if not dryrun else "/lowcmd_dryrun_" + str(np.random.randint(0, 65535))
+        self.joy_stick_topic = "/wirelesscontroller"
+        self.depth_data_topic = "/forward_depth_image"
+
         self.dryrun = dryrun
         self.mode = mode
         self.policy_source = policy_source
@@ -224,10 +201,6 @@ class Go2ROS2Handler:
         self.joint_limits_high = self.robot_config['joint_limits_high'].to(self.device)
         self.joint_limits_low = self.robot_config['joint_limits_low'].to(self.device)
         self.torque_limits = self.robot_config['torque_limits'].to(self.device)
-        joint_pos_mid = (self.joint_limits_high + self.joint_limits_low) / 2
-        joint_pos_range = (self.joint_limits_high - self.joint_limits_low) / 2
-        self.joint_pos_protect_high = joint_pos_mid + joint_pos_range * self.dof_pos_protect_ratio
-        self.joint_pos_protect_low = joint_pos_mid - joint_pos_range * self.dof_pos_protect_ratio
         
         self.init_stand_config()
         
@@ -346,40 +319,53 @@ class Go2ROS2Handler:
             self.dof_vel_[0, sim_idx] = self.low_state_buffer.motor_state[real_idx].dq * self.dof_signs[sim_idx]
 
     def _joy_stick_callback(self, msg):
-        # self.get_logger().warn("Wireless controller message received.")
+        # Configurable parameters for the joy stick
+        lin_vel_deadband = 0.1
+        ang_vel_deadband = 0.1
+        cmd_px_range = [0.4, 1.0] 
+        cmd_nx_range = [0.4, 0.8]
+        cmd_py_range = [0.4, 0.8]
+        cmd_ny_range = [0.4, 0.8]
+        cmd_pyaw_range = [0.4, 1.6] 
+        cmd_nyaw_range = [0.4, 1.6] 
+        
+        # Update the buffer
         self.joy_stick_buffer = msg
-        if self.move_by_wireless_remote:
-            # left-y for forward/backward
-            ly = msg.ly
-            if ly > self.lin_vel_deadband:
-                vx = (ly - self.lin_vel_deadband) / (1 - self.lin_vel_deadband) # (0, 1)
-                vx = vx * (self.cmd_px_range[1] - self.cmd_px_range[0]) + self.cmd_px_range[0]
-            elif ly < -self.lin_vel_deadband:
-                vx = (ly + self.lin_vel_deadband) / (1 - self.lin_vel_deadband) # (-1, 0)
-                vx = vx * (self.cmd_nx_range[1] - self.cmd_nx_range[0]) - self.cmd_nx_range[0]
-            else:
-                vx = 0
-            # left-x for turning left/right
-            lx = -msg.lx
-            if lx > self.ang_vel_deadband:
-                yaw = (lx - self.ang_vel_deadband) / (1 - self.ang_vel_deadband)
-                yaw = yaw * (self.cmd_pyaw_range[1] - self.cmd_pyaw_range[0]) + self.cmd_pyaw_range[0]
-            elif lx < -self.ang_vel_deadband:
-                yaw = (lx + self.ang_vel_deadband) / (1 - self.ang_vel_deadband)
-                yaw = yaw * (self.cmd_nyaw_range[1] - self.cmd_nyaw_range[0]) - self.cmd_nyaw_range[0]
-            else:
-                yaw = 0
-            # right-x for side moving left/right
-            rx = -msg.rx
-            if rx > self.lin_vel_deadband:
-                vy = (rx - self.lin_vel_deadband) / (1 - self.lin_vel_deadband)
-                vy = vy * (self.cmd_py_range[1] - self.cmd_py_range[0]) + self.cmd_py_range[0]
-            elif rx < -self.lin_vel_deadband:
-                vy = (rx + self.lin_vel_deadband) / (1 - self.lin_vel_deadband)
-                vy = vy * (self.cmd_ny_range[1] - self.cmd_ny_range[0]) - self.cmd_ny_range[0]
-            else:
-                vy = 0
-            self.xyyaw_command = torch.tensor([[vx, vy, yaw]], device=self.device, dtype=torch.float32)
+
+        # Process the message
+        # left-y for forward/backward
+        ly = msg.ly
+        if ly > lin_vel_deadband:
+            vx = (ly - lin_vel_deadband) / (1 - lin_vel_deadband) # (0, 1)
+            vx = vx * (cmd_px_range[1] - cmd_px_range[0]) + cmd_px_range[0]
+        elif ly < -lin_vel_deadband:
+            vx = (ly + lin_vel_deadband) / (1 - lin_vel_deadband) # (-1, 0)
+            vx = vx * (cmd_nx_range[1] - cmd_nx_range[0]) - cmd_nx_range[0]
+        else:
+            vx = 0
+        # left-x for turning left/right
+        lx = -msg.lx
+        if lx > ang_vel_deadband:
+            yaw = (lx - ang_vel_deadband) / (1 - ang_vel_deadband)
+            yaw = yaw * (cmd_pyaw_range[1] - cmd_pyaw_range[0]) + cmd_pyaw_range[0]
+        elif lx < -ang_vel_deadband:
+            yaw = (lx + ang_vel_deadband) / (1 - ang_vel_deadband)
+            yaw = yaw * (cmd_nyaw_range[1] - cmd_nyaw_range[0]) - cmd_nyaw_range[0]
+        else:
+            yaw = 0
+        # right-x for side moving left/right
+        rx = -msg.rx
+        if rx > lin_vel_deadband:
+            vy = (rx - lin_vel_deadband) / (1 - lin_vel_deadband)
+            vy = vy * (cmd_py_range[1] - cmd_py_range[0]) + cmd_py_range[0]
+        elif rx < -lin_vel_deadband:
+            vy = (rx + lin_vel_deadband) / (1 - lin_vel_deadband)
+            vy = vy * (cmd_ny_range[1] - cmd_ny_range[0]) - cmd_ny_range[0]
+        else:
+            vy = 0
+
+        # Update the buffer
+        self.xyyaw_command = torch.tensor([[vx, vy, yaw]], device=self.device, dtype=torch.float32)
 
     def _depth_data_callback(self, msg):
         self.depth_data = torch.tensor(msg.data, dtype=torch.float32).reshape(1, 58, 87).to(self.device)
