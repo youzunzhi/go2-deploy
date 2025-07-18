@@ -100,7 +100,7 @@ class Go2Runner:
                 # Run one iteration
                 self.main_loop()
                 rclpy.spin_once(self.handler.node, timeout_sec=0.)
-                
+            
                 # Sleep remaining time to maintain frequency
                 sleep_time = max(0, self.duration - (time.monotonic() - main_loop_time))
                 time.sleep(sleep_time)
