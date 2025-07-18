@@ -48,13 +48,18 @@ class Go2Runner:
         self.log_system_info()
 
         self.handler.start_ros_handlers()
-        self.handler.warm_up()
+
+    def warm_up(self):
+        warm_up_iter = 2
+        for _ in range(warm_up_iter):
+            _ = self.policy_interface.get_action()
 
     def main_loop(self):
         """Main control loop for the Go2 robot - handles different operational modes based on joystick input"""
         use_locomotion_policy = self.sport_mode_manager.sport_mode_before_locomotion()
 
         if use_locomotion_policy:
+            self.warm_up()
             action = self.policy_interface.get_action()
             self.handler.send_action(action)
             self.handler.global_counter += 1

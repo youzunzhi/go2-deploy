@@ -166,7 +166,6 @@ class Go2ROS2Handler:
         self.depth_data_topic = "/forward_depth_image"
 
         self.dryrun = dryrun
-        self.mode = mode
         self.policy_source = policy_source
 
         # Get policy-specific robot configuration
@@ -183,9 +182,7 @@ class Go2ROS2Handler:
         else:
             self.n_proprio = 53  # EPO format: ang_vel(3) + imu(2) + yaw_info(3) + commands(3) + locomotion_walk(2) + dof_pos(12) + dof_vel(12) + last_actions(12) + contact(4)
         self.n_depth_latent = 32
-        self.n_hist_len = 10
 
-        self.proprio_history_buf = torch.zeros(1, self.n_hist_len, self.n_proprio, device=self.device, dtype=torch.float)
         self.episode_length_buf = torch.zeros(1, device=self.device, dtype=torch.float)
         self.forward_depth_latent_yaw_buffer = torch.zeros(1, self.n_depth_latent+2, device=self.device, dtype=torch.float)
         self.xyyaw_command = torch.tensor([[0, 0, 0]], device=self.device, dtype=torch.float32)
@@ -296,7 +293,6 @@ class Go2ROS2Handler:
         self.firstRun = True
 
         self.actions = torch.zeros(self.NUM_ACTIONS, device=self.device, dtype=torch.float32)    
-        self.proprio_history_buf = torch.zeros(1, self.n_hist_len, self.n_proprio, device=self.device, dtype=torch.float)
         self.episode_length_buf = torch.zeros(1, device=self.device, dtype=torch.float)
         self.forward_depth_latent_yaw_buffer = torch.zeros(1, self.n_depth_latent+2, device=self.device, dtype=torch.float)
         self.xyyaw_command = torch.tensor([[0, 0, 0]], device=self.device, dtype=torch.float32)
@@ -585,42 +581,6 @@ class Go2ROS2Handler:
         self.low_cmd_buffer.crc = get_crc(self.low_cmd_buffer)
         self.low_cmd_pub.publish(self.low_cmd_buffer)
     """ Done: functions that actually publish the commands and take effect """
-
-    def warm_up(self):
-        """This warm up is useful in my experiment on Go2
-        The first two iterations are very slow, but the rest is fast"""
-        for _ in range(2):
-            start_time = time.monotonic()
-
-            proprio = self.get_proprio()
-            get_pro_time = time.monotonic()
-            proprio_history = self._get_history_proprio() 
-            get_hist_pro_time = time.monotonic()
-
-            depth_image = self._get_depth_image()
-            self.depth_latent_yaw = self.depth_encode(depth_image, proprio)
-
-            get_obs_time = time.monotonic()
-
-            obs = self.turn_obs(proprio, self.depth_latent_yaw, proprio_history, self.n_proprio, self.n_depth_latent, self.n_hist_len)
-            obs = torch.clip(obs, -self.clip_obs, self.clip_obs)
-
-            turn_obs_time = time.monotonic()
-
-            action = self.policy(obs)
-            policy_time = time.monotonic()
-
-            publish_time = time.monotonic()
-            print("warm up: ",
-                "get proprio time: {:.5f}".format(get_pro_time - start_time),
-                "get hist pro time: {:.5f}".format(get_hist_pro_time - get_pro_time),
-                "get_depth time: {:.5f}".format(get_obs_time - get_hist_pro_time),
-                "get obs time: {:.5f}".format(get_obs_time - start_time),
-                "turn_obs_time: {:.5f}".format(turn_obs_time - get_obs_time),
-                "policy_time: {:.5f}".format(policy_time - turn_obs_time),
-                "publish_time: {:.5f}".format(publish_time - policy_time),
-                "total time: {:.5f}".format(publish_time - start_time)
-            )
 
     def register_models(self, turn_obs, depth_encode, policy):
         """Register the model functions for observation processing and policy execution"""
