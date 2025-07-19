@@ -19,14 +19,13 @@ class LeggedLocoPolicyInterface(BasePolicyInterface):
 
     def _get_obs(self):
         assert self.handler is not None, "Handler is not set"
-        ang_vel = self.handler._get_ang_vel_obs()
-        base_rpy = self.handler._get_base_rpy_obs()
-        dof_pos = self.handler._get_dof_pos_obs()
-        dof_vel = self.handler._get_dof_vel_obs()
-        last_actions = self.handler._get_last_actions_obs()
+        ang_vel = self.handler.get_ang_vel_obs()
+        base_rpy = self.handler.get_base_rpy_obs()
+        dof_pos = self.handler.get_dof_pos_obs()
+        dof_vel = self.handler.get_dof_vel_obs()
+        last_actions = self.handler.get_last_actions_obs()
+        commands = self.handler.get_xyyaw_command()
         
-        commands = torch.tensor([[0.4, 0., 0.]], device=self.device, dtype=torch.float32)
-
         obs = torch.cat([ang_vel, base_rpy, commands, dof_pos, dof_vel, last_actions], dim=-1)
 
         return obs

@@ -113,7 +113,6 @@ class Go2ROS2Handler:
 
         self.NUM_JOINTS = len(self.joint_map) # number of joints (12)
 
-        self.episode_length_buf = torch.zeros(1, device=self.device, dtype=torch.float)
         self.xyyaw_command = torch.tensor([[0, 0, 0]], device=self.device, dtype=torch.float32)
         self.contact_filt = torch.ones((1, 4), device=self.device, dtype=torch.float32)
         self.last_contact_filt = torch.ones((1, 4), device=self.device, dtype=torch.float32)
@@ -129,7 +128,6 @@ class Go2ROS2Handler:
         joint_pos_limit_high_sim = self.map_list_in_real_order_to_sim_order(joint_pos_limit_high_real)
         joint_pos_limit_low_sim = self.map_list_in_real_order_to_sim_order(joint_pos_limit_low_real)
         torque_limit_sim = self.map_list_in_real_order_to_sim_order(torque_limit_real)
-
         self.joint_pos_limit_high_sim = torch.tensor(joint_pos_limit_high_sim, device=self.device, dtype=torch.float32)
         self.joint_pos_limit_low_sim = torch.tensor(joint_pos_limit_low_sim, device=self.device, dtype=torch.float32)
         self.torque_limit_sim = torch.tensor(torque_limit_sim, device=self.device, dtype=torch.float32)
@@ -234,7 +232,6 @@ class Go2ROS2Handler:
         self.firstRun = True
 
         self.actions = torch.zeros(self.NUM_JOINTS, device=self.device, dtype=torch.float32)    
-        self.episode_length_buf = torch.zeros(1, device=self.device, dtype=torch.float)
         self.xyyaw_command = torch.tensor([[0, 0, 0]], device=self.device, dtype=torch.float32)
         self.contact_filt = torch.ones((1, 4), device=self.device, dtype=torch.float32)
         self.last_contact_filt = torch.ones((1, 4), device=self.device, dtype=torch.float32)    
@@ -346,12 +343,15 @@ class Go2ROS2Handler:
     """ Done: ROS callbacks and handlers that update the buffer """
 
     """ refresh observation buffer and corresponding sub-functions """
+
+    def get_xyyaw_command(self):
+        return self.xyyaw_command
     
-    def _get_ang_vel_obs(self):
+    def get_ang_vel_obs(self):
         ang_vel = torch.from_numpy(self.low_state_buffer.imu_state.gyroscope).unsqueeze(0).to(device=self.device, dtype=torch.float32)
         return ang_vel
 
-    def _get_base_rpy_obs(self):
+    def get_base_rpy_obs(self):
         quat_xyzw = torch.tensor([
             self.low_state_buffer.imu_state.quaternion[1],
             self.low_state_buffer.imu_state.quaternion[2],
@@ -362,16 +362,16 @@ class Go2ROS2Handler:
         base_rpy = torch.tensor([[roll, pitch, yaw]], device=self.device, dtype=torch.float32)
         return base_rpy
 
-    def _get_dof_pos_obs(self):
+    def get_dof_pos_obs(self):
         return (self.dof_pos_ - self.default_joint_pos.unsqueeze(0))
     
-    def _get_dof_vel_obs(self):
+    def get_dof_vel_obs(self):
         return self.dof_vel_
     
-    def _get_last_actions_obs(self):
+    def get_last_actions_obs(self):
         return self.actions
 
-    def _get_contact_filt_obs(self):
+    def get_contact_filt_obs(self):
         for i in range(4):
             if self.low_state_buffer.foot_force[i] < 25:
                 self.contact_filt[:, i] = -0.5
@@ -379,7 +379,7 @@ class Go2ROS2Handler:
                 self.contact_filt[:, i] = 0.5
         return self.contact_filt
 
-    def _get_depth_image(self):
+    def get_depth_image(self):
         return self.depth_data
 
     def clip_actions_by_joint_limits(self, robot_coordinates_action):

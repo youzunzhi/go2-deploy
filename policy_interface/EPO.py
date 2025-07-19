@@ -23,13 +23,13 @@ class EPOPolicyInterface(BasePolicyInterface):
     def _get_obs(self):
         assert self.handler is not None, "Handler is not set"
         global_counter = self.handler.global_counter
-        depth_image = self.handler._get_depth_image()
-        ang_vel = self.handler._get_ang_vel_obs()
-        base_rpy = self.handler._get_base_rpy_obs()
-        dof_pos = self.handler._get_dof_pos_obs()
-        dof_vel = self.handler._get_dof_vel_obs()
-        last_actions = self.handler._get_last_actions_obs()
-        contact = self.handler._get_contact_filt_obs()
+        depth_image = self.handler.get_depth_image()
+        ang_vel = self.handler.get_ang_vel_obs()
+        base_rpy = self.handler.get_base_rpy_obs()
+        dof_pos = self.handler.get_dof_pos_obs()
+        dof_vel = self.handler.get_dof_vel_obs()
+        last_actions = self.handler.get_last_actions_obs()
+        contact = self.handler.get_contact_filt_obs()
         return self.obs_manager.get_obs(global_counter, depth_image, ang_vel, base_rpy, dof_pos, dof_vel, last_actions, contact)
     
     def _get_action_from_obs(self, obs):
