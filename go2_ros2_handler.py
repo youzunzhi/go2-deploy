@@ -85,10 +85,7 @@ class Go2ROS2Handler:
         clip_obs: float,
         clip_actions: Optional[float],
         device="cpu",
-        dof_pos_protect_ratio=1.1, # if the dof_pos is out of the range of this ratio, the process will shutdown.
         dryrun=True, # if True, the robot will not send commands to the real robot
-        mode="locomotion",
-        policy_source="EPO", # Policy source: "EPO" or "legged-loco"
     ):
         self.device = device
         
@@ -131,9 +128,7 @@ class Go2ROS2Handler:
         self.joint_pos_limit_high_sim = torch.tensor(joint_pos_limit_high_sim, device=self.device, dtype=torch.float32)
         self.joint_pos_limit_low_sim = torch.tensor(joint_pos_limit_low_sim, device=self.device, dtype=torch.float32)
         self.torque_limit_sim = torch.tensor(torque_limit_sim, device=self.device, dtype=torch.float32)
-        
-        self.visual_update_interval = 5
-
+    
     def map_list_in_real_order_to_sim_order(self, list_in_real_order: list) -> list:
         """
         Map a list of configs in real joint order to sim joint order
