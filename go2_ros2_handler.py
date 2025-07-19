@@ -2,14 +2,12 @@ import os, sys
 from typing import Optional
 
 import rclpy
-from rclpy.node import Node
 from unitree_go.msg import (
     WirelessController,
     LowState,
-    SportModeState,
     LowCmd,
 )
-from unitree_api.msg import Request, RequestHeader
+from unitree_api.msg import Request
 
 from std_msgs.msg import Float32MultiArray
 
@@ -25,11 +23,11 @@ elif os.uname().machine == "aarch64":
     ))
 from crc_module import get_crc  # type: ignore
 
-from multiprocessing import Process
-from collections import OrderedDict
 import numpy as np
 import torch
 import time
+
+from utils.hardware import JOINT_POS_LIMIT_HIGH, JOINT_POS_LIMIT_LOW, TORQUE_LIMIT
 
 
 @torch.jit.script  # type: ignore
@@ -57,60 +55,6 @@ def get_euler_xyz(q):
 
     return roll, pitch, yaw
 
-class Go2RobotCfgs:
-    NUM_DOF = 12
-    NUM_ACTIONS = 12
-    
-    @staticmethod
-    def get_config_for_policy_source(policy_source="EPO"):
-        """Get robot configuration based on policy source to handle different joint orderings"""
-        config = {
-            'NUM_DOF': 12,
-            'NUM_ACTIONS': 12,
-            'dof_signs': [1.] * 12,
-            'turn_on_motor_mode': [0x01] * 12,
-        }
-        
-        if policy_source == "legged-loco":    
-            # Joint limits in legged-loco simulation order
-            config['joint_limits_high'] = torch.tensor([
-                1.0472, 1.0472, 1.0472, 1.0472,    # Hip joints: FL, FR, RL, RR
-                3.4907, 3.4907, 4.5379, 4.5379,    # Thigh joints: FL, FR, RL, RR  
-                -0.83776, -0.83776, -2.7227, -2.7227  # Calf joints: FL, FR, RL, RR
-            ], device="cpu", dtype=torch.float32)
-            config['joint_limits_low'] = torch.tensor([
-                -1.0472, -1.0472, -1.0472, -1.0472,  # Hip joints: FL, FR, RL, RR
-                -1.5708, -1.5708, -0.5236, -0.5236,  # Thigh joints: FL, FR, RL, RR
-                -2.7227, -2.7227, -2.7227, -2.7227   # Calf joints: FL, FR, RL, RR
-            ], device="cpu", dtype=torch.float32)
-            config['torque_limits'] = torch.tensor([
-                25, 25, 25, 25,  # Hip joints: FL, FR, RL, RR
-                40, 40, 40, 40,  # Thigh joints: FL, FR, RL, RR
-                40, 40, 40, 40   # Calf joints: FL, FR, RL, RR
-            ], device="cpu", dtype=torch.float32)
-        else:
-            # Joint limits in EPO simulation order (leg-grouped)
-            config['joint_limits_high'] = torch.tensor([
-                1.0472, 3.4907, -0.83776,    # FR leg
-                1.0472, 3.4907, -0.83776,    # FL leg
-                1.0472, 4.5379, -0.83776,    # RR leg
-                1.0472, 4.5379, -0.83776,    # RL leg
-            ], device="cpu", dtype=torch.float32)
-            config['joint_limits_low'] = torch.tensor([
-                -1.0472, -1.5708, -2.7227,   # FR leg
-                -1.0472, -1.5708, -2.7227,   # FL leg
-                -1.0472, -0.5236, -2.7227,   # RR leg
-                -1.0472, -0.5236, -2.7227,   # RL leg
-            ], device="cpu", dtype=torch.float32)
-            config['torque_limits'] = torch.tensor([
-                25, 40, 40,  # FR leg
-                25, 40, 40,  # FL leg
-                25, 40, 40,  # RR leg
-                25, 40, 40,  # RL leg
-            ], device="cpu", dtype=torch.float32)
-        
-        return config
-    
     
 
 class Go2ROS2Handler:
@@ -166,44 +110,41 @@ class Go2ROS2Handler:
         self.depth_data_topic = "/forward_depth_image"
 
         self.dryrun = dryrun
-        self.policy_source = policy_source
 
-        # Get policy-specific robot configuration
-        self.robot_config = Go2RobotCfgs.get_config_for_policy_source(policy_source)
-        self.NUM_DOF = self.robot_config['NUM_DOF']
-        self.NUM_ACTIONS = self.robot_config['NUM_ACTIONS']
-        self.dof_names = self.robot_config['dof_names']
-        self.dof_signs = self.robot_config['dof_signs']
-        self.turn_on_motor_mode = self.robot_config['turn_on_motor_mode']
-
-        # Set observation dimensions based on policy source
-        if policy_source == "legged-loco":
-            self.n_proprio = 45  # base_ang_vel(3) + base_rpy(3) + velocity_commands(3) + joint_pos(12) + joint_vel(12) + actions(12)
-        else:
-            self.n_proprio = 53  # EPO format: ang_vel(3) + imu(2) + yaw_info(3) + commands(3) + locomotion_walk(2) + dof_pos(12) + dof_vel(12) + last_actions(12) + contact(4)
-        self.n_depth_latent = 32
+        self.NUM_JOINTS = len(self.joint_map) # number of joints (12)
 
         self.episode_length_buf = torch.zeros(1, device=self.device, dtype=torch.float)
-        self.forward_depth_latent_yaw_buffer = torch.zeros(1, self.n_depth_latent+2, device=self.device, dtype=torch.float)
         self.xyyaw_command = torch.tensor([[0, 0, 0]], device=self.device, dtype=torch.float32)
         self.contact_filt = torch.ones((1, 4), device=self.device, dtype=torch.float32)
         self.last_contact_filt = torch.ones((1, 4), device=self.device, dtype=torch.float32)
-
-        self.dof_pos_ = torch.empty(1, self.NUM_DOF, device=self.device, dtype=torch.float32)
-        self.dof_vel_ = torch.empty(1, self.NUM_DOF, device=self.device, dtype=torch.float32)
-        self.actions = torch.zeros(self.NUM_ACTIONS, device=self.device, dtype=torch.float32)    
+        self.dof_pos_ = torch.empty(1, self.NUM_JOINTS, device=self.device, dtype=torch.float32)
+        self.dof_vel_ = torch.empty(1, self.NUM_JOINTS, device=self.device, dtype=torch.float32)
+        self.actions = torch.zeros(self.NUM_JOINTS, device=self.device, dtype=torch.float32)    
 
         ###################### hardware related #####################
         # Use policy-specific joint and torque limits
-        self.joint_limits_high = self.robot_config['joint_limits_high'].to(self.device)
-        self.joint_limits_low = self.robot_config['joint_limits_low'].to(self.device)
-        self.torque_limits = self.robot_config['torque_limits'].to(self.device)
+        joint_pos_limit_high_real = list(JOINT_POS_LIMIT_HIGH.values())
+        joint_pos_limit_low_real = list(JOINT_POS_LIMIT_LOW.values())
+        torque_limit_real = list(TORQUE_LIMIT.values())
+        joint_pos_limit_high_sim = self.map_list_in_real_order_to_sim_order(joint_pos_limit_high_real)
+        joint_pos_limit_low_sim = self.map_list_in_real_order_to_sim_order(joint_pos_limit_low_real)
+        torque_limit_sim = self.map_list_in_real_order_to_sim_order(torque_limit_real)
+
+        self.joint_pos_limit_high_sim = torch.tensor(joint_pos_limit_high_sim, device=self.device, dtype=torch.float32)
+        self.joint_pos_limit_low_sim = torch.tensor(joint_pos_limit_low_sim, device=self.device, dtype=torch.float32)
+        self.torque_limit_sim = torch.tensor(torque_limit_sim, device=self.device, dtype=torch.float32)
         
         self.init_stand_config()
         
         self.global_counter = 0
         self.visual_update_interval = 5
 
+    def map_list_in_real_order_to_sim_order(self, list_in_real_order: list) -> list:
+        """
+        Map a list of configs in real joint order to sim joint order
+        """
+        return [list_in_real_order[self.joint_map[sim_idx]] for sim_idx in range(len(list_in_real_order))]
+        
     def init_stand_config(self):
         self.startPos = [0.0] * 12
         self._targetPos_1 = [0.0, 1.36, -2.65, 0.0, 1.36, -2.65,
@@ -292,9 +233,8 @@ class Go2ROS2Handler:
         self.firstrun_target_1 = True
         self.firstRun = True
 
-        self.actions = torch.zeros(self.NUM_ACTIONS, device=self.device, dtype=torch.float32)    
+        self.actions = torch.zeros(self.NUM_JOINTS, device=self.device, dtype=torch.float32)    
         self.episode_length_buf = torch.zeros(1, device=self.device, dtype=torch.float)
-        self.forward_depth_latent_yaw_buffer = torch.zeros(1, self.n_depth_latent+2, device=self.device, dtype=torch.float)
         self.xyyaw_command = torch.tensor([[0, 0, 0]], device=self.device, dtype=torch.float32)
         self.contact_filt = torch.ones((1, 4), device=self.device, dtype=torch.float32)
         self.last_contact_filt = torch.ones((1, 4), device=self.device, dtype=torch.float32)    
@@ -307,12 +247,12 @@ class Go2ROS2Handler:
         self.low_state_buffer = msg # keep the latest low state
 
         ################### refresh dof_pos and dof_vel ######################
-        for sim_idx in range(self.NUM_DOF):
+        for sim_idx in range(self.NUM_JOINTS):
             real_idx = self.joint_map[sim_idx]
-            self.dof_pos_[0, sim_idx] = self.low_state_buffer.motor_state[real_idx].q * self.dof_signs[sim_idx]
-        for sim_idx in range(self.NUM_DOF):
+            self.dof_pos_[0, sim_idx] = self.low_state_buffer.motor_state[real_idx].q
+        for sim_idx in range(self.NUM_JOINTS):
             real_idx = self.joint_map[sim_idx]
-            self.dof_vel_[0, sim_idx] = self.low_state_buffer.motor_state[real_idx].dq * self.dof_signs[sim_idx]
+            self.dof_vel_[0, sim_idx] = self.low_state_buffer.motor_state[real_idx].dq
 
     def _joy_stick_callback(self, msg):
         # Configurable parameters for the joy stick
@@ -454,8 +394,8 @@ class Go2ROS2Handler:
         """
         # Use instance joint limits (policy-specific)
         clipped_action = torch.clamp(robot_coordinates_action, 
-                                   self.joint_limits_low.unsqueeze(0), 
-                                   self.joint_limits_high.unsqueeze(0))
+                                   self.joint_pos_limit_low_sim.unsqueeze(0), 
+                                   self.joint_pos_limit_high_sim.unsqueeze(0))
         
         return clipped_action
     
@@ -476,7 +416,7 @@ class Go2ROS2Handler:
         # For |tau| <= torque_limit:
         # target_min = current + (-torque_limit + kd * vel) / kp
         # target_max = current + (torque_limit + kd * vel) / kp
-        torque_limit = self.torque_limits.unsqueeze(0)  # (1, NUM_DOF)
+        torque_limit = self.torque_limit_sim.unsqueeze(0)  # (1, NUM_DOF)
         
         # Calculate position limits based on torque constraints
         target_min = current_joint_pos + (-torque_limit + self.kd * current_joint_vel) / self.kp
@@ -555,11 +495,11 @@ class Go2ROS2Handler:
         q_cmd_sim_order: shape (NUM_DOF,), in simulation order.
         """
         #################### check ##############################
-        for sim_idx in range(self.NUM_DOF):
+        for sim_idx in range(self.NUM_JOINTS):
             real_idx = self.joint_map[sim_idx]
             if not self.dryrun:
-                self.low_cmd_buffer.motor_cmd[real_idx].mode = self.turn_on_motor_mode[sim_idx]
-            self.low_cmd_buffer.motor_cmd[real_idx].q = q_cmd_sim_order[sim_idx].item() * self.dof_signs[sim_idx]
+                self.low_cmd_buffer.motor_cmd[real_idx].mode = 0x01
+            self.low_cmd_buffer.motor_cmd[real_idx].q = q_cmd_sim_order[sim_idx].item()
             self.low_cmd_buffer.motor_cmd[real_idx].dq = 0.
             self.low_cmd_buffer.motor_cmd[real_idx].tau = 0.
             self.low_cmd_buffer.motor_cmd[real_idx].kp = self.kp
@@ -570,7 +510,7 @@ class Go2ROS2Handler:
 
     def _turn_off_motors(self):
         """ Turn off the motors """
-        for sim_idx in range(self.NUM_DOF):
+        for sim_idx in range(self.NUM_JOINTS):
             real_idx = self.joint_map[sim_idx]
             self.low_cmd_buffer.motor_cmd[real_idx].mode = 0x00
             self.low_cmd_buffer.motor_cmd[real_idx].q = 0.

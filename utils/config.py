@@ -3,7 +3,7 @@ import json
 from collections import OrderedDict
 import yaml
 import re
-
+from .hardware import HARDWARE_ORDER
 
 def get_joint_map_from_names(joint_names):
     """
@@ -19,27 +19,14 @@ def get_joint_map_from_names(joint_names):
         joint_map: List where each element is the hardware index for the corresponding simulation index
     """
     # Define hardware order mapping: joint_name -> hardware_index
-    hardware_order = {
-        "FR_hip_joint": 0,
-        "FR_thigh_joint": 1,
-        "FR_calf_joint": 2,
-        "FL_hip_joint": 3,
-        "FL_thigh_joint": 4,
-        "FL_calf_joint": 5,
-        "RR_hip_joint": 6,
-        "RR_thigh_joint": 7,
-        "RR_calf_joint": 8,
-        "RL_hip_joint": 9,
-        "RL_thigh_joint": 10,
-        "RL_calf_joint": 11,
-    }
+
     
     # Generate joint map: simulation_index -> hardware_index
     joint_map = []
     for joint_name in joint_names:
-        if joint_name not in hardware_order:
-            raise ValueError(f"Unknown joint name: {joint_name}. Valid joint names are: {list(hardware_order.keys())}")
-        joint_map.append(hardware_order[joint_name])
+        if joint_name not in HARDWARE_ORDER:
+            raise ValueError(f"Unknown joint name: {joint_name}. Valid joint names are: {list(HARDWARE_ORDER.keys())}")
+        joint_map.append(HARDWARE_ORDER[joint_name])
     
     return joint_map
 
