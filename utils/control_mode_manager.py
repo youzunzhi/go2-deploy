@@ -17,11 +17,12 @@ class ControlModeManager:
     Flow:
     Sport mode -(L1)-> Stand mode -(Y)-> Locomotion mode -(L2)-> Sport mode
     """
-    def __init__(self, handler):
+    def __init__(self, handler, policy_interface):
         self.handler = handler
+        self.policy_interface = policy_interface
         self.which_mode = "sport" # "sport"|"stand"|"locomotion"
         self.stand_controller = StandController(handler)
-        
+
     def sport_mode_before_locomotion(self):
         """ Handle sport mode operations based on controller input.
         Return True if the sport mode is switched to stand policy.
@@ -46,8 +47,6 @@ class ControlModeManager:
             if (self.handler.joy_stick_buffer.keys & self.handler.WirelessButtons.Y):
                 self.handler.log_info("Y pressed, use the locomotion policy")
                 self.switch_to_locomotion_policy()
-                return True
-        return False
                     
     def switch_to_sport_mode(self):
         """Switch to sport mode from other modes"""
@@ -65,7 +64,8 @@ class ControlModeManager:
     def switch_to_locomotion_policy(self):
         """Switch to locomotion policy from other modes"""
         self.which_mode = "locomotion"
-        self.handler.global_counter = 0
+        self.policy_interface.policy_iter_counter = 0
+        self.warm_up_for_locomotion_policy()
 
     def sport_mode_after_locomotion(self):
         """Switch to sport mode after locomotion if L2 is pressed
@@ -74,8 +74,11 @@ class ControlModeManager:
         if (self.handler.joy_stick_buffer.keys & self.handler.WirelessButtons.L2):
             self.handler.log_info("L2 pressed, stop using locomotion policy, switch to sport mode.")
             self.switch_to_sport_mode()
-            return True
-        return False
+
+    def warm_up_for_locomotion_policy(self):
+        warm_up_iter = 2
+        for _ in range(warm_up_iter):
+            _ = self.policy_interface.get_action()
 
 
 class StandController:

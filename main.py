@@ -42,30 +42,23 @@ class Go2Runner:
         # Set handler to policy interface
         self.policy_interface.set_handler(self.handler)
 
-        self.control_mode_manager = ControlModeManager(self.handler)
+        self.control_mode_manager = ControlModeManager(self.handler, self.policy_interface)
         
         # Print configuration information
         self.log_system_info()
 
-        self.handler.start_ros_handlers()
+        self.handler.start_ros_handlers()   
 
-    def warm_up(self):
-        warm_up_iter = 2
-        for _ in range(warm_up_iter):
-            _ = self.policy_interface.get_action()
 
     def main_loop(self):
         """Main control loop for the Go2 robot - handles different operational modes based on joystick input"""
-        use_locomotion_policy = self.control_mode_manager.sport_mode_before_locomotion()
+        self.control_mode_manager.sport_mode_before_locomotion()
 
-        if use_locomotion_policy:
-            self.warm_up()
+        if self.control_mode_manager.which_mode == "locomotion":
             action = self.policy_interface.get_action()
             self.handler.send_action(action)
-            self.handler.global_counter += 1
 
-        if self.control_mode_manager.sport_mode_after_locomotion():
-            self.handler.log_info("L2 pressed, stop using locomotion policy, switch back to sport mode.")
+        self.control_mode_manager.sport_mode_after_locomotion()
 
     @torch.inference_mode()
     def run(self):
@@ -80,7 +73,7 @@ class Go2Runner:
     
     def _start_main_loop_timer(self):
         """Start the main loop timer for ROS-based timing control"""
-        self.handler.main_loop_timer = self.handler.node.create_timer(
+        self.handler.node.create_timer(
             self.duration, # in sec
             self.main_loop,
         )

@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import os
-from utils.model_and_obs import BasePolicyInterface
+from base import BasePolicyInterface
 from collections import OrderedDict
 import json
 import os.path as osp
@@ -16,13 +16,14 @@ class EPOPolicyInterface(BasePolicyInterface):
         self.obs_manager = ObsManager(device, depth_encoder, estimator, hist_encoder, self.n_hist_len, self.n_proprio, self.obs_scales)
 
     def get_action(self):
+        self.policy_iter_counter += 1
         obs = self._get_obs()
         action = self._get_action_from_obs(obs)
         return action
     
     def _get_obs(self):
         assert self.handler is not None, "Handler is not set"
-        global_counter = self.handler.global_counter
+        policy_iter_counter = self.policy_iter_counter
         depth_image = self.handler.get_depth_image()
         ang_vel = self.handler.get_ang_vel_obs()
         base_rpy = self.handler.get_base_rpy_obs()
@@ -30,7 +31,7 @@ class EPOPolicyInterface(BasePolicyInterface):
         dof_vel = self.handler.get_dof_vel_obs()
         last_actions = self.handler.get_last_actions_obs()
         contact = self.handler.get_contact_filt_obs()
-        return self.obs_manager.get_obs(global_counter, depth_image, ang_vel, base_rpy, dof_pos, dof_vel, last_actions, contact)
+        return self.obs_manager.get_obs(policy_iter_counter, depth_image, ang_vel, base_rpy, dof_pos, dof_vel, last_actions, contact)
     
     def _get_action_from_obs(self, obs):
         return self.actor(obs)
@@ -135,10 +136,10 @@ class ObsManager:
 
         self.activation = nn.ELU()
 
-    def get_obs(self, global_counter, depth_image, ang_vel, base_rpy, dof_pos, dof_vel, last_actions, contact):
+    def get_obs(self, policy_iter_counter, depth_image, ang_vel, base_rpy, dof_pos, dof_vel, last_actions, contact):
         proprio = self.get_proprio(ang_vel, base_rpy, dof_pos, dof_vel, last_actions, contact)
-        if global_counter % self.visual_update_interval == 0:
-            if global_counter == 0:
+        if policy_iter_counter % self.visual_update_interval == 0:
+            if policy_iter_counter == 0:
                 last_depth_image = depth_image
             depth_latent_yaw = self.depth_encoder(last_depth_image, proprio)
         self.last_depth_image = depth_image

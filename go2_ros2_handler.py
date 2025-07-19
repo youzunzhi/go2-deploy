@@ -132,7 +132,6 @@ class Go2ROS2Handler:
         self.joint_pos_limit_low_sim = torch.tensor(joint_pos_limit_low_sim, device=self.device, dtype=torch.float32)
         self.torque_limit_sim = torch.tensor(torque_limit_sim, device=self.device, dtype=torch.float32)
         
-        self.global_counter = 0
         self.visual_update_interval = 5
 
     def map_list_in_real_order_to_sim_order(self, list_in_real_order: list) -> list:

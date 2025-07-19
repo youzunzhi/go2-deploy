@@ -13,6 +13,7 @@ class LeggedLocoPolicyInterface(BasePolicyInterface):
         self._load_model()
         
     def get_action(self):
+        self.policy_iter_counter += 1
         obs = self._get_obs()
         action = self.policy(obs)
         return action
