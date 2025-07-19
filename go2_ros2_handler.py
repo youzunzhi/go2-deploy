@@ -132,8 +132,6 @@ class Go2ROS2Handler:
         self.joint_pos_limit_low_sim = torch.tensor(joint_pos_limit_low_sim, device=self.device, dtype=torch.float32)
         self.torque_limit_sim = torch.tensor(torque_limit_sim, device=self.device, dtype=torch.float32)
         
-        self.init_stand_config()
-        
         self.global_counter = 0
         self.visual_update_interval = 5
 
@@ -143,22 +141,6 @@ class Go2ROS2Handler:
         """
         return [list_in_real_order[self.joint_map[sim_idx]] for sim_idx in range(len(list_in_real_order))]
         
-    def init_stand_config(self):
-        self.startPos = [0.0] * 12
-        self._targetPos_1 = [0.0, 1.36, -2.65, 0.0, 1.36, -2.65,
-                             -0.2, 1.36, -2.65, 0.2, 1.36, -2.65]
-        self._targetPos_2 = [0.0, 0.67, -1.3, 0.0, 0.67, -1.3,
-                             0.0, 0.67, -1.3, 0.0, 0.67, -1.3]
-        self.stand_action = [0.0] * 12
-
-        self.duration_1 = 10
-        self.duration_2 = 100
-        self.percent_1 = 0
-        self.percent_2 = 0
-
-        self.firstrun_target_1 = True
-        self.firstRun = True
-
     def start_ros_handlers(self):
         """ after initializing the env and policy, register ros related callbacks and topics
         """
@@ -222,15 +204,6 @@ class Go2ROS2Handler:
         self.log_info("Low state and wireless message received, the robot is ready to go.")
 
     def reset_obs(self):
-        self.startPos = [0.0] * 12
-        self.stand_action = [0.0] * 12
-
-        self.percent_1 = 0
-        self.percent_2 = 0
-
-        self.firstrun_target_1 = True
-        self.firstRun = True
-
         self.actions = torch.zeros(self.NUM_JOINTS, device=self.device, dtype=torch.float32)    
         self.xyyaw_command = torch.tensor([[0, 0, 0]], device=self.device, dtype=torch.float32)
         self.contact_filt = torch.ones((1, 4), device=self.device, dtype=torch.float32)
@@ -452,42 +425,6 @@ class Go2ROS2Handler:
         robot_coordinates_action = self.clip_actions_by_torque_limits(robot_coordinates_action, current_joint_pos, current_joint_vel)
         
         self._publish_legs_cmd(robot_coordinates_action[0])
-
-    def send_stand_action(self, actions):
-        """ Send the action to the robot motors, which does the preprocessing
-        just like env.step in simulation.
-        Thus, the actions has the batch dimension, whose size is 1.
-        """
-        actions = torch.tensor(actions, device=self.device).unsqueeze(0)
-        self.actions = actions
-
-        self._publish_legs_cmd(actions[0])
-
-    def get_stand_action(self):
-        if self.firstRun:
-            for i in range(12):
-                self.startPos[i] = self.low_state_buffer.motor_state[i].q
-            self.firstRun = False
-
-        self.percent_1 += 1.0 / self.duration_1
-        self.percent_1 = min(self.percent_1, 1)
-        if self.percent_1 < 1:
-            for i in range(12):
-                self.stand_action[i] = (1 - self.percent_1) * self.startPos[i] + self.percent_1 * self._targetPos_1[i]
-
-            if self.firstrun_target_1:
-                self.log_info('Going to target Pos 1.', once=True)
-                self.firstrun_target_1 = False
-                self.firstrun_target_2 = True
-        if (self.percent_1 == 1) and (self.percent_2 <= 1):
-            self.percent_2 += 1.0 / self.duration_2
-            self.percent_2 = min(self.percent_2, 1)
-            for i in range(12):
-                self.stand_action[i] = (1 - self.percent_2) * self._targetPos_1[i] + self.percent_2 * self._targetPos_2[i]
-
-            self.log_info('Staying in target Pos 2.', once=True)
-
-        return self.stand_action
 
     """ functions that actually publish the commands and take effect """
     def _publish_legs_cmd(self, q_cmd_sim_order):
