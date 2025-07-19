@@ -4,84 +4,115 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a robotics deployment system for the Unitree Go2 quadruped robot that deploys reinforcement learning policies from multiple training environments. Originally based on Extreme-Parkour-Onboard, this system is being refactored to support policies from both legged_gym (Extreme-Parkour-Onboard) and IsaacLab (legged-loco) training environments.
+This is a robotics deployment system for the Unitree Go2 quadruped robot designed to deploy reinforcement learning policies from multiple training environments. The system has been refactored to support policies from both legged_gym (Extreme-Parkour-Onboard) and IsaacLab (legged-loco) training environments through a policy interface abstraction.
 
 ## Current Development Goals
 
 **Primary Objective**: Create a unified deployment system that can load and run RL policies from different training environments with minimal configuration changes.
 
-**Immediate Focus**: 
-- Deploy locomotion policies from `logs/rsl_rl/go2_base/2025-07-03_21-32-44_XXX/` (legged-loco/IsaacLab)
-- Maintain compatibility with existing Extreme-Parkour-Onboard policies
-- Handle differences in configuration formats and observation structures between training environments
+**Current Focus**: 
+- Clean and restructure the handler file (`go2_ros2_handler.py`) for better readability and maintainability
+- Code organization and optimization
+- Testing and debugging the multi-policy system
+- Performance optimization and timing improvements
 
-**Key Challenge**: Different training environments produce policies with incompatible configuration methods and observation structures (e.g., `clip_actions` exists in Extreme-Parkour-Onboard configs but not in legged-loco configs).
+**System Status**: 
+- Policy interface abstraction implemented
+- Multi-policy loading system in place
+- Configuration management refactored
+- Handler system needs cleanup and optimization
 
 ## Architecture
 
 ### Core Components
 
-- **`main.py`** - Primary orchestration system managing the control loop, neural network inference, and mode switching
-- **`go2_ros2_node.py`** - ROS2 node handling robot communication, sensor data processing, and low-level motor control
+- **`main.py`** - Main runner class (`Go2Runner`) orchestrating the control loop and system initialization
+- **`go2_ros2_handler.py`** - ROS2 handler managing robot communication, sensor data processing, motor control, and observation collection
+- **`policy_interface/`** - Modular policy interface system supporting multiple training environments:
+  - `base.py` - Abstract base class for policy interfaces
+  - `EPO.py` - Extreme-Parkour-Onboard policy implementation
+  - `legged_loco.py` - IsaacLab/legged-loco policy implementation
+  - `__init__.py` - Factory function for policy interface selection
+- **`utils/control_mode_manager.py`** - State management for robot operational modes (sport/stand/locomotion)
+- **`utils/config.py`** - Configuration utilities and joint mapping
+- **`utils/hardware.py`** - Hardware-specific constants and limits
 - **`visual_node.py`** - Visual processing pipeline for Intel RealSense depth camera integration
-- **`weight-and-cfg/`** - Neural network weights and comprehensive robot configuration
+- **`weight-and-cfg/`** - Neural network weights and configuration files organized by policy source
 
 ### Control Flow
 
-1. Initialize ROS2 node and robot connections
-2. Load policy-specific configurations and weights when switching to neural network modes
-3. Run 50Hz control loop (20ms intervals) with timing modes:
+1. **Initialization**: `Go2Runner` creates policy interface, handler, and sport mode manager
+2. **Policy Interface**: Detects and loads appropriate policy based on logdir path
+3. **Configuration Loading**: Policy interface provides handler configuration (joint maps, PID gains, scaling, etc.)
+4. **ROS Setup**: Handler initializes ROS2 publishers, subscribers, and communication
+5. **Control Loop**: 50Hz main loop with configurable timing modes:
    - **ROS Timer**: Standard ROS2-managed timing
    - **Manual Control**: Precise timing for high-performance operation
-4. Switch between operational modes based on controller input:
+6. **Mode Management**: Sport mode manager handles state transitions based on controller input:
    - **Sport Mode**: Built-in Unitree behaviors (stand, sit, balance)
    - **Stand Policy**: Neural network-based standing with disturbance rejection
    - **Locomotion Policy**: AI-powered walking with visual-motor coordination
 
-### Neural Network Architecture
+## Policy Interface System
 
-The system supports multiple neural network architectures depending on the policy source:
-- **StateHistoryEncoder**: Historical state processing for temporal awareness
-- **RecurrentDepthBackbone**: Depth perception processing  
-- **DepthOnlyFCBackbone58x87**: Visual feature extraction from depth images
-- Models are loaded as PyTorch JIT (.pt) or standard PyTorch (.pth) files
-- **Multi-policy support**: Architecture detection and loading based on policy source
+The policy interface abstraction handles the complexity of different training environments:
 
-## Policy Sources and Configuration System
-
-**IMPORTANT**: Policy source repositories (legged-loco, Extreme-Parkour-Onboard) are READ-ONLY. Never modify code in these repositories - only copy weights and configurations to go2-deploy.
+### Interface Structure
+```python
+class BasePolicyInterface:
+    def get_configs_for_handler() -> (joint_map, default_joint_pos, kp, kd, action_scale, clip_obs, clip_actions)
+    def set_handler(handler)
+    def get_action() -> action_tensor
+```
 
 ### Supported Policy Sources
 
-1. **Extreme-Parkour-Onboard** (legged_gym-based)
-   - Current configuration: `weight-and-cfg/EPO/config.json`
-   - Contains parameters like `clip_actions`, action scaling, terrain settings
-   - Fully supported and tested
+1. **Extreme-Parkour-Onboard (EPO)**
+   - Configuration: `weight-and-cfg/EPO/config.json`
+   - Models: `base_jit.pt`, `vision_weight.pt`
+   - Features: Depth vision integration, history encoding, state estimation
 
-2. **legged-loco** (IsaacLab-based) - **IN DEVELOPMENT**
-   - Target policies: `logs/rsl_rl/go2_base/2025-07-03_21-32-44_XXX/`
-   - Configuration stored in `params/` subdirectory
-   - Different configuration structure than Extreme-Parkour-Onboard
-   - Main challenge: Configuration mapping between training environments
+2. **legged-loco (IsaacLab)** 
+   - Configuration: `weight-and-cfg/legged-loco/params/`
+   - Models: `policy.jit`
+   - Features: Locomotion policies
 
-### Configuration Challenges
-
-- **Format Differences**: Each training environment uses different configuration file structures
-- **Missing Parameters**: Some parameters exist in one environment but not another (e.g., `clip_actions`)
-- **Observation Structures**: Different training environments may have different observation space definitions
-- **Action Scaling**: Different approaches to action normalization and scaling
-
-### Directory Structure for Multi-Policy Support
-
+### Directory Structure
 ```
-weight-and-cfg/
-├── EPO/                    # Extreme-Parkour-Onboard policies
-│   ├── config.json
-│   └── *.pt/*.pth
-├── legged-loco/           # IsaacLab policies (planned)
-│   ├── params/            # Configuration files
-│   └── *.pt/*.pth         # Model weights
-└── [future-sources]/      # Additional training environments
+go2-deploy/
+├── main.py                 # Main runner and entry point
+├── go2_ros2_handler.py     # ROS2 handler and robot control
+├── go2_controller.py       # Controller utilities
+├── visual_node.py          # Visual processing pipeline
+├── policy_interface/       # Policy abstraction system
+│   ├── __init__.py         # Factory function for policy selection
+│   ├── base.py             # Abstract base class
+│   ├── EPO.py              # Extreme-Parkour-Onboard implementation
+│   └── legged_loco.py      # IsaacLab implementation
+├── utils/                  # Utility modules
+│   ├── __init__.py
+│   ├── config.py           # Configuration utilities and joint mapping
+│   ├── hardware.py         # Hardware constants and limits
+│   └── control_mode_manager.py # Robot mode state management
+├── weight-and-cfg/         # Neural network weights and configurations
+│   ├── EPO/                # Extreme-Parkour-Onboard policies
+│   │   ├── config.json
+│   │   ├── base_jit.pt
+│   │   └── vision_weight.pt
+│   ├── legged-loco/        # IsaacLab policies
+│   │   ├── params/
+│   │   │   ├── agent.yaml
+│   │   │   └── env.yaml
+│   │   └── policy.jit
+│   └── [future-sources]/   # Additional training environments
+├── aarch64/                # ARM64 architecture binaries
+│   └── crc_module.so
+├── x86/                    # x86_64 architecture binaries
+│   └── crc_module.so
+├── CLAUDE.md               # Project documentation for Claude Code
+├── README.md               # Project readme
+├── QUICKSTART.md           # Quick start guide
+└── LICENSE                 # License file
 ```
 
 ## Development Commands
@@ -89,22 +120,30 @@ weight-and-cfg/
 ### Running the System
 
 ```bash
-# Basic execution
-python main.py
+# Run with EPO policy
+python main.py --logdir weight-and-cfg/EPO
+
+# Run with legged-loco policy  
+python main.py --logdir weight-and-cfg/legged-loco
 
 # With specific timing mode
 python main.py --timing_mode ros_timer  # or manual_control
 
 # Debug mode without robot movement
 python main.py --dryrun
+
+# Specify device
+python main.py --device cuda  # or cpu
 ```
 
 ### Controller Input
 
-- **R1**: Sport mode (built-in behaviors)
-- **R2**: Stand policy (neural network standing)
-- **X**: Locomotion policy (AI walking)
-- **Start**: Emergency stop
+- **L1**: Switch from sport mode to stand policy
+- **Y**: Switch from stand policy to locomotion policy  
+- **L2**: Switch back to sport mode from any mode
+- **R1**: Stand up (in sport mode)
+- **R2**: Sit down (in sport mode)
+- **X**: Balance stand (in sport mode)
 
 ## Dependencies
 
@@ -121,66 +160,57 @@ python main.py --dryrun
 - x86_64 and aarch64 architectures
 - CRC module for reliable communication
 
-## Performance Monitoring
-
-The system includes detailed timing analysis of:
-- Proprioception acquisition time
-- Visual processing time  
-- Neural network inference time
-- Command publishing time
-- Total control loop time
-
-Use timing logs to optimize performance and identify bottlenecks.
-
 ## Safety Features
 
 - **Dryrun mode**: Testing without robot movement
-- **Collision detection**: Contact force monitoring
-- **Emergency stop**: Controller-based safety shutdown
-- **Hardware abstraction**: Safe motor control with PID gains
+- **Joint limit clipping**: Enforces hardware joint position limits
+- **Torque limit clipping**: Prevents excessive motor torques
+- **Contact force monitoring**: Foot contact detection for safety
+- **Emergency modes**: Controller-based safety shutdown and mode switching
+- **Hardware abstraction**: Safe motor control with configurable PID gains
 
-## Development Status and Next Steps
+## Current Development Status
 
-### Current Implementation Status
-- ✅ Basic deployment system working with Extreme-Parkour-Onboard policies
-- ✅ ROS2 integration and robot communication
-- ✅ Visual processing pipeline
-- 🔄 **IN PROGRESS**: Configuration loading system refactoring
-- ❌ **TODO**: legged-loco policy support
-- ❌ **TODO**: Unified configuration interface
+### Implementation Status
+- Multi-policy deployment system structure in place
+- Policy interface abstraction implemented
+- Configuration management system refactored
+- ROS2 integration and robot communication
+- Visual processing pipeline
+- Sport mode management
+- Safety systems and motor control
 
-### Immediate Development Tasks
-1. **Configuration System Refactoring**: Create unified interface for loading configurations from different training environments
-2. **Policy Loader Abstraction**: Abstract policy loading to handle different weight formats and observation structures
-3. **Configuration Mapping**: Implement translation layer between different configuration formats
-4. **Testing Framework**: Ensure new policies work correctly without breaking existing functionality
+### Immediate Tasks
+1. **Handler Refactoring**: Clean up `go2_ros2_handler.py` structure and readability
+2. **Testing and Debugging**: Validate multi-policy system functionality
+3. **Performance Optimization**: Reduce computational overhead and improve timing
+4. **Code Documentation**: Enhance inline documentation and type hints
+5. **Error Handling**: Improve robustness and error recovery
 
-### Code Organization Principles
+## File Structure and Development Guidelines
+
+### Core Files
+- **`main.py`**: Main runner and argument parsing
+- **`go2_ros2_handler.py`**: ROS2 communication and robot control *(CURRENT CLEANUP TARGET)*
+- **`policy_interface/`**: Policy abstraction system
+- **`utils/`**: Utility modules (config, hardware, sport mode management)
+
+### Development Principles
 - **Read-only external repositories**: Never modify legged-loco or Extreme-Parkour-Onboard code
-- **Copy, don't link**: Copy necessary weights and configurations to go2-deploy structure
-- **Abstraction layers**: Create interfaces that hide differences between training environments
-- **Backward compatibility**: Maintain support for existing Extreme-Parkour-Onboard policies
-
-## File Structure and Development Notes
-
-### Policy Organization
-- **Extreme-Parkour-Onboard**: `weight-and-cfg/EPO/` (current)
-- **legged-loco**: `weight-and-cfg/legged-loco/` (planned)
-- **Future policies**: `weight-and-cfg/[source-name]/`
-
-### Development Guidelines
-- Configuration changes require restart of the main control loop
-- Visual processing parameters are hardcoded in `visual_node.py` for performance
-- ROS2 node parameters are configured in `go2_ros2_node.py`
-- **Never modify external repositories**: legged-loco and Extreme-Parkour-Onboard are read-only
-- **Copy files only**: Copy weights and configs to go2-deploy, don't create symlinks
-
-### Refactoring Focus Areas
-- `main.py`: Configuration loading and policy switching logic
-- Policy loading abstraction for different training environments
-- Configuration format translation and validation
-- Observation structure handling for different policy types
+- **Clean abstractions**: Maintain clear separation between policy logic and robot control
+- **Backward compatibility**: Ensure changes don't break existing policy support
+- **Safety first**: Always maintain hardware safety limits and emergency controls
 
 ### Configuration Management
-- **Do not modify configuration files**: 
-  - Don't try to create or modify configuration files in weight-and-cfg/, as they are copied from simulation training and I want to keep them as they were.
+- **Do not modify configuration files**: Configuration files in weight-and-cfg/ are copied from simulation training and should remain unchanged
+- **Policy-specific configs**: Each policy interface handles its own configuration format
+- **Automatic detection**: System automatically selects appropriate policy interface based on logdir path
+
+### Handler Cleanup Goals
+The `go2_ros2_handler.py` file is the current focus for cleanup and should be refactored for:
+- Better code organization and structure
+- Improved readability and maintainability  
+- Clearer separation of concerns
+- Enhanced documentation
+- Reduced complexity in large methods
+- More concise and clear code structure

@@ -1,6 +1,6 @@
 # Go2 Deployment System
 
-Deploy reinforcement learning policies on the Unitree Go2 quadruped robot.
+Deploy reinforcement learning policies on the Unitree Go2 quadruped robot adapt from https://github.com/change-every/Extreme-Parkour-Onboard.
 
 ## Quick Start
 
