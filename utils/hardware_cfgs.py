@@ -108,3 +108,13 @@ class WirelessButtons:
     right =         0b10000000000000 # 8192
     down =          0b100000000000000 # 16384
     left =          0b1000000000000000 # 32768
+
+# ROS2 Topic Names
+ROS_TOPICS = {
+    "LOW_STATE": "/lowstate",
+    "LOW_CMD": "/lowcmd",
+    "WIRELESS_CONTROLLER": "/wirelesscontroller",
+    "DEPTH_IMAGE": "/forward_depth_image",
+    "SPORT_MODE": "/api/sport_mode/request",
+    "MOTION_SWITCHER": "/api/motion_switcher/request",
+}

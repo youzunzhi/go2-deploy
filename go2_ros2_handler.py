@@ -27,7 +27,7 @@ import numpy as np
 import torch
 import time
 
-from utils.hardware_cfgs import JOINT_POS_LIMIT_HIGH, JOINT_POS_LIMIT_LOW, TORQUE_LIMIT
+from utils.hardware_cfgs import JOINT_POS_LIMIT_HIGH, JOINT_POS_LIMIT_LOW, TORQUE_LIMIT, ROS_TOPICS
 from utils.joint_order_util import map_list_in_real_order_to_sim_order
 
 
@@ -84,11 +84,6 @@ class Go2ROS2Handler:
         self.clip_obs = clip_obs
         self.clip_actions = clip_actions
 
-        self.low_state_topic = "/lowstate"
-        self.low_cmd_topic = "/lowcmd" if not dryrun else "/lowcmd_dryrun_" + str(np.random.randint(0, 65535))
-        self.joy_stick_topic = "/wirelesscontroller"
-        self.depth_data_topic = "/forward_depth_image"
-
         self.dryrun = dryrun
 
         self.NUM_JOINTS = len(self.joint_map) # number of joints (12)
@@ -116,9 +111,10 @@ class Go2ROS2Handler:
         """ after initializing the env and policy, register ros related callbacks and topics
         """
         # Low-level command publisher
+        low_cmd_topic = ROS_TOPICS["LOW_CMD"] if not self.dryrun else ROS_TOPICS["LOW_CMD"] + "_dryrun_" + str(np.random.randint(0, 65535))
         self.low_cmd_pub = self.node.create_publisher(
             LowCmd,
-            self.low_cmd_topic,
+            low_cmd_topic,
             1
         )
         self.low_cmd_buffer = LowCmd()
@@ -126,7 +122,7 @@ class Go2ROS2Handler:
         # Low-level state subscriber
         self.low_state_sub = self.node.create_subscription(
             LowState,
-            self.low_state_topic,
+            ROS_TOPICS["LOW_STATE"],
             self._low_state_callback,
             1
         )
@@ -135,7 +131,7 @@ class Go2ROS2Handler:
         # Wireless controller subscriber
         self.joy_stick_sub = self.node.create_subscription(
             WirelessController,
-            self.joy_stick_topic,
+            ROS_TOPICS["WIRELESS_CONTROLLER"],
             self._joy_stick_callback,
             1
         )
@@ -144,30 +140,31 @@ class Go2ROS2Handler:
         # Sport mode publisher (Control the robot in built-in sport mode)
         self.sport_mode_pub = self.node.create_publisher(
             Request,
-            '/api/sport/request',
+            ROS_TOPICS["SPORT_MODE"],
             1,
         )
 
         # Motion switcher publisher (Switch between built-in sport mode and low-level control mode)
         self.motion_switcher_pub = self.node.create_publisher(
             Request,
-            '/api/motion_switcher/request',
+            ROS_TOPICS["MOTION_SWITCHER"],
             1,
         )
 
         # Depth image subscriber (For EPO policy)
         self.depth_input_sub = self.node.create_subscription(
             Float32MultiArray,
-            self.depth_data_topic,
+            ROS_TOPICS["DEPTH_IMAGE"],
             self._depth_data_callback,
             1
         )
 
         self.log_info("ROS handlers started, waiting to recieve critical low state and wireless controller messages.")
         if not self.dryrun:
-            self.log_warn(f"You are running the code in no-dryrun mode and publishing to '{self.low_cmd_topic}', Please keep safe.")
+            self.log_warn(f"You are running the code in no-dryrun mode and publishing to '{low_cmd_topic}', Please keep safe.")
         else:
-            self.log_warn(f"You are publishing low cmd to '{self.low_cmd_topic}' because of dryrun mode, Please check and be safe.")
+            self.log_warn(f"You are publishing low cmd to '{low_cmd_topic}' because of dryrun mode, Please check and be safe.")
+            
         while rclpy.ok():
             rclpy.spin_once(self.node)
             if hasattr(self, "low_state_buffer") and hasattr(self, "joy_stick_buffer"):
