@@ -1,5 +1,5 @@
 import torch
-from utils.hardware import STAND_STAGE1_DURATION, STAND_STAGE2_DURATION, STAND_TARGET_POS_STAGE1, STAND_TARGET_POS_STAGE2
+from utils.hardware_cfgs import STAND_STAGE1_DURATION, STAND_STAGE2_DURATION, STAND_TARGET_POS_STAGE1, STAND_TARGET_POS_STAGE2, WirelessButtons
 
 ROBOT_SPORT_API_ID_BALANCESTAND = 1002
 ROBOT_SPORT_API_ID_STANDUP = 1004
@@ -28,23 +28,23 @@ class ControlModeManager:
         Return True if the sport mode is switched to stand policy.
         """
         if self.which_mode == "sport":
-            if (self.handler.joy_stick_buffer.keys & self.handler.WirelessButtons.R1):
+            if (self.handler.joy_stick_buffer.keys & WirelessButtons.R1):
                 self.handler.log_info("In the sport mode, R1 pressed, robot will stand up.")
                 self.handler._sport_mode_command(ROBOT_SPORT_API_ID_STANDUP)
-            if (self.handler.joy_stick_buffer.keys & self.handler.WirelessButtons.R2):
+            if (self.handler.joy_stick_buffer.keys & WirelessButtons.R2):
                 self.handler.log_info("In the sport mode, R2 pressed, robot will sit down.")
                 self.handler._sport_mode_command(ROBOT_SPORT_API_ID_STANDDOWN)
-            if (self.handler.joy_stick_buffer.keys & self.handler.WirelessButtons.X):
+            if (self.handler.joy_stick_buffer.keys & WirelessButtons.X):
                 self.handler.log_info("In the sport mode, X pressed, robot will balance stand.")
                 self.handler._sport_mode_command(ROBOT_SPORT_API_ID_BALANCESTAND)
-            if (self.handler.joy_stick_buffer.keys & self.handler.WirelessButtons.L1):
+            if (self.handler.joy_stick_buffer.keys & WirelessButtons.L1):
                 self.handler.log_info("Exist the sport mode. Switch to stand policy.")
                 self.switch_to_stand_policy()
 
         if self.which_mode == "stand":
             self.stand_controller.send_stand_action()
 
-            if (self.handler.joy_stick_buffer.keys & self.handler.WirelessButtons.Y):
+            if (self.handler.joy_stick_buffer.keys & WirelessButtons.Y):
                 self.handler.log_info("Y pressed, use the locomotion policy")
                 self.switch_to_locomotion_policy()
                     
@@ -71,7 +71,7 @@ class ControlModeManager:
         """Switch to sport mode after locomotion if L2 is pressed
         return True if the sport mode is switched to sport mode
         """
-        if (self.handler.joy_stick_buffer.keys & self.handler.WirelessButtons.L2):
+        if (self.handler.joy_stick_buffer.keys & WirelessButtons.L2):
             self.handler.log_info("L2 pressed, stop using locomotion policy, switch to sport mode.")
             self.switch_to_sport_mode()
 

@@ -27,7 +27,7 @@ import numpy as np
 import torch
 import time
 
-from utils.hardware import JOINT_POS_LIMIT_HIGH, JOINT_POS_LIMIT_LOW, TORQUE_LIMIT
+from utils.hardware_cfgs import JOINT_POS_LIMIT_HIGH, JOINT_POS_LIMIT_LOW, TORQUE_LIMIT
 
 
 @torch.jit.script  # type: ignore
@@ -58,23 +58,6 @@ def get_euler_xyz(q):
     
 
 class Go2ROS2Handler:
-    class WirelessButtons:
-        R1 =            0b00000001 # 1
-        L1 =            0b00000010 # 2
-        start =         0b00000100 # 4
-        select =        0b00001000 # 8
-        R2 =            0b00010000 # 16
-        L2 =            0b00100000 # 32
-        F1 =            0b01000000 # 64
-        F2 =            0b10000000 # 128
-        A =             0b100000000 # 256
-        B =             0b1000000000 # 512
-        X =             0b10000000000 # 1024
-        Y =             0b100000000000 # 2048
-        up =            0b1000000000000 # 4096
-        right =         0b10000000000000 # 8192
-        down =          0b100000000000000 # 16384
-        left =          0b1000000000000000 # 32768
 
     def __init__(self,
         joint_map: list,
