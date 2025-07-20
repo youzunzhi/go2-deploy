@@ -31,7 +31,6 @@ class Go2Runner:
             default_joint_pos=default_joint_pos,
             device=device,
             dryrun=not args.nodryrun,
-            mode=args.mode,
             kp=kp,
             kd=kd,
             action_scale=action_scale,
@@ -123,7 +122,7 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     
-    parser.add_argument("--logdir", type=str, default=None, help="The directory which contains the config.json and model_*.pt files")
+    parser.add_argument("--logdir", type=str, default='weight-and-cfg/legged-loco', help="The directory which contains the config and model weights files")
     parser.add_argument("--nodryrun", action="store_true", default=False, help="Disable dryrun mode")
     parser.add_argument("--timing_mode", type=str, default="ros_timer",
         choices=["manual_control", "ros_timer"],

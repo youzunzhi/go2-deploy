@@ -403,7 +403,7 @@ class Go2ROS2Handler:
             self.low_cmd_buffer.motor_cmd[real_idx].tau = 0.
             self.low_cmd_buffer.motor_cmd[real_idx].kp = self.kp
             self.low_cmd_buffer.motor_cmd[real_idx].kd = self.kd
-        
+            
         self.low_cmd_buffer.crc = get_crc(self.low_cmd_buffer)
         self.low_cmd_pub.publish(self.low_cmd_buffer)
 

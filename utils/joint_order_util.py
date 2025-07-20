@@ -1,9 +1,5 @@
-import os.path as osp
-import json
-from collections import OrderedDict
-import yaml
 import re
-from hardware_cfgs import HARDWARE_ORDER
+from utils.hardware_cfgs import HARDWARE_ORDER
 
 def get_joint_map_from_names(joint_names):
     """

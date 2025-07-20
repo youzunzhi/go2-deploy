@@ -1,11 +1,12 @@
 import torch
 import torch.nn as nn
 import os
-from base import BasePolicyInterface
 from collections import OrderedDict
 import json
 import os.path as osp
-from utils.config import get_joint_map_from_names, parse_default_joint_pos_dict
+
+from .base import BasePolicyInterface
+from utils import get_joint_map_from_names, parse_default_joint_pos_dict
 
 class EPOPolicyInterface(BasePolicyInterface):
     def __init__(self, logdir, device):

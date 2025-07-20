@@ -3,7 +3,7 @@ import os
 import os.path as osp
 import yaml
 from .base import BasePolicyInterface
-from utils.config import get_joint_map_from_names, parse_default_joint_pos_dict
+from utils import get_joint_map_from_names, parse_default_joint_pos_dict
 
 
 class LeggedLocoPolicyInterface(BasePolicyInterface):
@@ -41,7 +41,7 @@ class LeggedLocoPolicyInterface(BasePolicyInterface):
     def _load_configs(self):
         config_path = osp.join(self.logdir, "params/env.yaml")
         with open(config_path, "r") as f:
-            full_config = yaml.safe_load(f)
+            full_config = yaml.load(f, Loader=yaml.Loader)
 
         # legged-loco uses grouped joint order: [all hips, all thighs, all calves]
         # isaaclab sim: FL_hip(0), FR_hip(1), RL_hip(2), RR_hip(3), FL_thigh(4), FR_thigh(5), RL_thigh(6), RR_thigh(7), FL_calf(8), FR_calf(9), RL_calf(10), RR_calf(11)
