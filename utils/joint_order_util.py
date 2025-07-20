@@ -3,7 +3,7 @@ import json
 from collections import OrderedDict
 import yaml
 import re
-from .hardware import HARDWARE_ORDER
+from hardware_cfgs import HARDWARE_ORDER
 
 def get_joint_map_from_names(joint_names):
     """
@@ -84,3 +84,17 @@ def expand_regex_joint_positions(regex_joint_pos_dict, joint_names):
                 expanded_dict[joint_name] = value
     
     return expanded_dict
+
+
+def map_list_in_real_order_to_sim_order(list_in_real_order: list, joint_map: list) -> list:
+    """
+    Map a list of configs in real joint order to sim joint order
+    
+    Args:
+        list_in_real_order: List of values in hardware joint order
+        joint_map: List where each element is the hardware index for the corresponding simulation index
+        
+    Returns:
+        list: List of values in simulation joint order
+    """
+    return [list_in_real_order[joint_map[sim_idx]] for sim_idx in range(len(list_in_real_order))]

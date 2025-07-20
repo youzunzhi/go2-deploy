@@ -28,6 +28,7 @@ import torch
 import time
 
 from utils.hardware_cfgs import JOINT_POS_LIMIT_HIGH, JOINT_POS_LIMIT_LOW, TORQUE_LIMIT
+from utils.joint_order_util import map_list_in_real_order_to_sim_order
 
 
 @torch.jit.script  # type: ignore
@@ -58,7 +59,6 @@ def get_euler_xyz(q):
     
 
 class Go2ROS2Handler:
-
     def __init__(self,
         joint_map: list,
         default_joint_pos: list,
@@ -105,19 +105,13 @@ class Go2ROS2Handler:
         joint_pos_limit_high_real = list(JOINT_POS_LIMIT_HIGH.values())
         joint_pos_limit_low_real = list(JOINT_POS_LIMIT_LOW.values())
         torque_limit_real = list(TORQUE_LIMIT.values())
-        joint_pos_limit_high_sim = self.map_list_in_real_order_to_sim_order(joint_pos_limit_high_real)
-        joint_pos_limit_low_sim = self.map_list_in_real_order_to_sim_order(joint_pos_limit_low_real)
-        torque_limit_sim = self.map_list_in_real_order_to_sim_order(torque_limit_real)
+        joint_pos_limit_high_sim = map_list_in_real_order_to_sim_order(joint_pos_limit_high_real, self.joint_map)
+        joint_pos_limit_low_sim = map_list_in_real_order_to_sim_order(joint_pos_limit_low_real, self.joint_map)
+        torque_limit_sim = map_list_in_real_order_to_sim_order(torque_limit_real, self.joint_map)
         self.joint_pos_limit_high_sim = torch.tensor(joint_pos_limit_high_sim, device=self.device, dtype=torch.float32)
         self.joint_pos_limit_low_sim = torch.tensor(joint_pos_limit_low_sim, device=self.device, dtype=torch.float32)
         self.torque_limit_sim = torch.tensor(torque_limit_sim, device=self.device, dtype=torch.float32)
     
-    def map_list_in_real_order_to_sim_order(self, list_in_real_order: list) -> list:
-        """
-        Map a list of configs in real joint order to sim joint order
-        """
-        return [list_in_real_order[self.joint_map[sim_idx]] for sim_idx in range(len(list_in_real_order))]
-        
     def start_ros_handlers(self):
         """ after initializing the env and policy, register ros related callbacks and topics
         """
