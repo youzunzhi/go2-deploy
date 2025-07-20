@@ -87,12 +87,7 @@ class Go2ROS2Handler:
 
         self.NUM_JOINTS = len(self.joint_map) # number of joints (12)
 
-        self.xyyaw_command = torch.tensor([[0, 0, 0]], device=self.device, dtype=torch.float32)
-        self.contact_filt = torch.ones((1, 4), device=self.device, dtype=torch.float32)
-        self.last_contact_filt = torch.ones((1, 4), device=self.device, dtype=torch.float32)
-        self.dof_pos_ = torch.empty(1, self.NUM_JOINTS, device=self.device, dtype=torch.float32)
-        self.dof_vel_ = torch.empty(1, self.NUM_JOINTS, device=self.device, dtype=torch.float32)
-        self.actions = torch.zeros(self.NUM_JOINTS, device=self.device, dtype=torch.float32)    
+        self.init_buffers()
 
         ###################### hardware related #####################
         # Setup joint position and torque limits
@@ -163,16 +158,23 @@ class Go2ROS2Handler:
                 break
         self.log_info("Low state and wireless message received, the robot is ready to go.")
 
-    def reset_obs(self):
+    def init_buffers(self):
+        self.xyyaw_command = torch.zeros(1, 3, device=self.device, dtype=torch.float32)
+        self.dof_pos_ = torch.zeros(1, self.NUM_JOINTS, device=self.device, dtype=torch.float32)
+        self.dof_vel_ = torch.zeros(1, self.NUM_JOINTS, device=self.device, dtype=torch.float32)
         self.actions = torch.zeros(self.NUM_JOINTS, device=self.device, dtype=torch.float32)    
-        self.xyyaw_command = torch.tensor([[0, 0, 0]], device=self.device, dtype=torch.float32)
+        self.contact_filt = torch.ones((1, 4), device=self.device, dtype=torch.float32)
+        self.last_contact_filt = torch.ones((1, 4), device=self.device, dtype=torch.float32)
+
+    def reset_obs(self):
+        self.xyyaw_command = torch.zeros(1, 3, device=self.device, dtype=torch.float32)
+        self.actions = torch.zeros(self.NUM_JOINTS, device=self.device, dtype=torch.float32)    
         self.contact_filt = torch.ones((1, 4), device=self.device, dtype=torch.float32)
         self.last_contact_filt = torch.ones((1, 4), device=self.device, dtype=torch.float32)    
 
     """ ROS callbacks and handlers that update the buffer """
 
     def _low_state_callback(self, msg):
-        # self.get_logger().warn("Low state message received.")
         """ store and handle proprioception data """
         self.low_state_buffer = msg # keep the latest low state
 
@@ -419,12 +421,6 @@ class Go2ROS2Handler:
         self.low_cmd_pub.publish(self.low_cmd_buffer)
     """ Done: functions that actually publish the commands and take effect """
 
-    def register_models(self, turn_obs, depth_encode, policy):
-        """Register the model functions for observation processing and policy execution"""
-        self.turn_obs = turn_obs
-        self.depth_encode = depth_encode
-        self.policy = policy
-    
     def log_info(self, message, **kwargs):
         """Convenient logging method for info messages"""
         self.node.get_logger().info(message, **kwargs)
