@@ -27,8 +27,7 @@ import numpy as np
 import torch
 import time
 
-from utils.hardware_cfgs import JOINT_POS_LIMIT_HIGH, JOINT_POS_LIMIT_LOW, TORQUE_LIMIT, ROS_TOPICS
-from utils.joint_order_util import map_list_in_real_order_to_sim_order
+from utils.hardware_cfgs import ROS_TOPICS, get_joint_limits_in_sim_order
 
 
 @torch.jit.script  # type: ignore
@@ -96,28 +95,12 @@ class Go2ROS2Handler:
         self.actions = torch.zeros(self.NUM_JOINTS, device=self.device, dtype=torch.float32)    
 
         ###################### hardware related #####################
-        # Use policy-specific joint and torque limits
-        joint_pos_limit_high_real = list(JOINT_POS_LIMIT_HIGH.values())
-        joint_pos_limit_low_real = list(JOINT_POS_LIMIT_LOW.values())
-        torque_limit_real = list(TORQUE_LIMIT.values())
-        joint_pos_limit_high_sim = map_list_in_real_order_to_sim_order(joint_pos_limit_high_real, self.joint_map)
-        joint_pos_limit_low_sim = map_list_in_real_order_to_sim_order(joint_pos_limit_low_real, self.joint_map)
-        torque_limit_sim = map_list_in_real_order_to_sim_order(torque_limit_real, self.joint_map)
-        self.joint_pos_limit_high_sim = torch.tensor(joint_pos_limit_high_sim, device=self.device, dtype=torch.float32)
-        self.joint_pos_limit_low_sim = torch.tensor(joint_pos_limit_low_sim, device=self.device, dtype=torch.float32)
-        self.torque_limit_sim = torch.tensor(torque_limit_sim, device=self.device, dtype=torch.float32)
+        # Setup joint position and torque limits
+        self.joint_pos_limit_high_sim, self.joint_pos_limit_low_sim, self.torque_limit_sim = get_joint_limits_in_sim_order(self.joint_map, self.device)
     
     def start_ros_handlers(self):
         """ after initializing the env and policy, register ros related callbacks and topics
         """
-        # Low-level command publisher
-        low_cmd_topic = ROS_TOPICS["LOW_CMD"] if not self.dryrun else ROS_TOPICS["LOW_CMD"] + "_dryrun_" + str(np.random.randint(0, 65535))
-        self.low_cmd_pub = self.node.create_publisher(
-            LowCmd,
-            low_cmd_topic,
-            1
-        )
-        self.low_cmd_buffer = LowCmd()
 
         # Low-level state subscriber
         self.low_state_sub = self.node.create_subscription(
@@ -136,6 +119,15 @@ class Go2ROS2Handler:
             1
         )
         self.log_info("Wireless controller subscriber started, waiting to receive wireless controller messages.")
+
+        # Low-level command publisher
+        low_cmd_topic = ROS_TOPICS["LOW_CMD"] if not self.dryrun else ROS_TOPICS["LOW_CMD"] + "_dryrun_" + str(np.random.randint(0, 65535))
+        self.low_cmd_pub = self.node.create_publisher(
+            LowCmd,
+            low_cmd_topic,
+            1
+        )
+        self.low_cmd_buffer = LowCmd()
 
         # Sport mode publisher (Control the robot in built-in sport mode)
         self.sport_mode_pub = self.node.create_publisher(
@@ -164,7 +156,7 @@ class Go2ROS2Handler:
             self.log_warn(f"You are running the code in no-dryrun mode and publishing to '{low_cmd_topic}', Please keep safe.")
         else:
             self.log_warn(f"You are publishing low cmd to '{low_cmd_topic}' because of dryrun mode, Please check and be safe.")
-            
+
         while rclpy.ok():
             rclpy.spin_once(self.node)
             if hasattr(self, "low_state_buffer") and hasattr(self, "joy_stick_buffer"):
