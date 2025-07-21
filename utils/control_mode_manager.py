@@ -145,14 +145,25 @@ class StandController:
         # Initialize stand configuration
         self.reset_stand_sequence()
         
-        # Load target positions from hardware config
-        self._target_pos_stage1 = list(STAND_TARGET_POS_STAGE1.values())
-        self._target_pos_stage2 = list(STAND_TARGET_POS_STAGE2.values())
+        # Load target positions from hardware config and convert to simulation order
+        # CRITICAL: Target positions are defined in hardware order (by joint names)
+        # but we need them in simulation order to match start_pos and _publish_legs_cmd
+        target_pos_stage1_hw_order = list(STAND_TARGET_POS_STAGE1.values())
+        target_pos_stage2_hw_order = list(STAND_TARGET_POS_STAGE2.values())
         
+        # Convert from hardware order to simulation order
+        self._target_pos_stage1 = [0.0] * 12
+        self._target_pos_stage2 = [0.0] * 12
+        for sim_idx in range(12):
+            hw_idx = self.handler.joint_map[sim_idx]
+            self._target_pos_stage1[sim_idx] = target_pos_stage1_hw_order[hw_idx]
+            self._target_pos_stage2[sim_idx] = target_pos_stage2_hw_order[hw_idx]
+                
         # Stage durations (in control loop iterations)
         self.duration_stage1 = STAND_STAGE1_DURATION
         self.duration_stage2 = STAND_STAGE2_DURATION
-    
+
+
     def reset_stand_sequence(self):
         """Reset the standing sequence to initial state"""
         self.start_pos = [0.0] * 12
@@ -189,9 +200,20 @@ class StandController:
         return self.stand_action
     
     def _capture_initial_position(self):
-        """Record the current joint positions as starting point"""
-        for i in range(12):
-            self.start_pos[i] = self.handler.low_state_buffer.motor_state[i].q
+        """Record the current joint positions as starting point in simulation order.
+        
+        CRITICAL: This captures positions in simulation order to ensure consistency:
+        - start_pos: simulation order (captured here)
+        - _target_pos_stage1/2: simulation order (converted during init)
+        - _publish_legs_cmd: expects simulation order input
+        - Interpolation happens between start_pos and targets (both sim order)
+        """
+        # Capture current joint positions in simulation order
+        for sim_idx in range(12):
+            hw_idx = self.handler.joint_map[sim_idx]
+            self.start_pos[sim_idx] = self.handler.low_state_buffer.motor_state[hw_idx].q
+        
+        self.handler.log_info(f"Stand sequence: captured initial positions in simulation order")
     
     def _execute_stage1(self):
         """Execute stage 1: interpolate to intermediate position"""
@@ -201,7 +223,7 @@ class StandController:
         
         # Log stage transition once
         if self.need_log_stage1_once:
-            self.handler.log_info('Standing Stage 1: Moving to intermediate position', once=True)
+            self.handler.log_info('Standing Stage 1: Moving to intermediate position')
             self.need_log_stage1_once = False
             self.need_log_stage2_once = True
         
@@ -220,7 +242,7 @@ class StandController:
         
         # Log stage transition once
         if self.need_log_stage2_once:
-            self.handler.log_info('Standing Stage 2: Moving to policy-ready position', once=True)
+            self.handler.log_info('Standing Stage 2: Moving to policy-ready position')
             self.need_log_stage2_once = False
         
         # Interpolate between stage 1 and stage 2 target positions
