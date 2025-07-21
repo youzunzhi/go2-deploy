@@ -162,13 +162,13 @@ class Go2ROS2Handler:
         self.xyyaw_command = torch.zeros(1, 3, device=self.device, dtype=torch.float32)
         self.dof_pos_ = torch.zeros(1, self.NUM_JOINTS, device=self.device, dtype=torch.float32)
         self.dof_vel_ = torch.zeros(1, self.NUM_JOINTS, device=self.device, dtype=torch.float32)
-        self.actions = torch.zeros(self.NUM_JOINTS, device=self.device, dtype=torch.float32)    
+        self.actions = torch.zeros(1, self.NUM_JOINTS, device=self.device, dtype=torch.float32)    
         self.contact_filt = torch.ones((1, 4), device=self.device, dtype=torch.float32)
         self.last_contact_filt = torch.ones((1, 4), device=self.device, dtype=torch.float32)
 
     def reset_obs(self):
         self.xyyaw_command = torch.zeros(1, 3, device=self.device, dtype=torch.float32)
-        self.actions = torch.zeros(self.NUM_JOINTS, device=self.device, dtype=torch.float32)    
+        self.actions = torch.zeros(1, self.NUM_JOINTS, device=self.device, dtype=torch.float32)    
         self.contact_filt = torch.ones((1, 4), device=self.device, dtype=torch.float32)
         self.last_contact_filt = torch.ones((1, 4), device=self.device, dtype=torch.float32)    
 
@@ -371,6 +371,7 @@ class Go2ROS2Handler:
             actions = torch.tensor(actions, device=self.device).unsqueeze(0)
         
         self.actions = actions
+        assert self.actions.shape == (1, self.NUM_JOINTS), f"Actions shape is {self.actions.shape}, expected (1, {self.NUM_JOINTS})"
 
         if self.clip_actions is not None:
             hard_clip = self.clip_actions / self.action_scale
@@ -393,30 +394,35 @@ class Go2ROS2Handler:
         """ Publish the joint commands to the robot legs in simulation order.
         q_cmd_sim_order: shape (NUM_DOF,), in simulation order.
         """
-        #################### check ##############################
+        motor_cmd = self.low_cmd_buffer.motor_cmd
+        assert hasattr(motor_cmd, '__getitem__'), "motor_cmd must be indexable"
+
         for sim_idx in range(self.NUM_JOINTS):
             real_idx = self.joint_map[sim_idx]
             if not self.dryrun:
-                self.low_cmd_buffer.motor_cmd[real_idx].mode = 0x01
-            self.low_cmd_buffer.motor_cmd[real_idx].q = q_cmd_sim_order[sim_idx].item()
-            self.low_cmd_buffer.motor_cmd[real_idx].dq = 0.
-            self.low_cmd_buffer.motor_cmd[real_idx].tau = 0.
-            self.low_cmd_buffer.motor_cmd[real_idx].kp = self.kp
-            self.low_cmd_buffer.motor_cmd[real_idx].kd = self.kd
+                motor_cmd[real_idx].mode = 0x01 # type: ignore
+            motor_cmd[real_idx].q = q_cmd_sim_order[sim_idx].item() # type: ignore
+            motor_cmd[real_idx].dq = 0. # type: ignore
+            motor_cmd[real_idx].tau = 0. # type: ignore
+            motor_cmd[real_idx].kp = self.kp # type: ignore
+            motor_cmd[real_idx].kd = self.kd # type: ignore
             
         self.low_cmd_buffer.crc = get_crc(self.low_cmd_buffer)
         self.low_cmd_pub.publish(self.low_cmd_buffer)
 
     def _turn_off_motors(self):
         """ Turn off the motors """
+        motor_cmd = self.low_cmd_buffer.motor_cmd
+        assert hasattr(motor_cmd, '__getitem__'), "motor_cmd must be indexable"
+        
         for sim_idx in range(self.NUM_JOINTS):
             real_idx = self.joint_map[sim_idx]
-            self.low_cmd_buffer.motor_cmd[real_idx].mode = 0x00
-            self.low_cmd_buffer.motor_cmd[real_idx].q = 0.
-            self.low_cmd_buffer.motor_cmd[real_idx].dq = 0.
-            self.low_cmd_buffer.motor_cmd[real_idx].tau = 0.
-            self.low_cmd_buffer.motor_cmd[real_idx].kp = 0.
-            self.low_cmd_buffer.motor_cmd[real_idx].kd = 0.
+            motor_cmd[real_idx].mode = 0x00 # type: ignore
+            motor_cmd[real_idx].q = 0. # type: ignore
+            motor_cmd[real_idx].dq = 0. # type: ignore
+            motor_cmd[real_idx].tau = 0. # type: ignore
+            motor_cmd[real_idx].kp = 0. # type: ignore
+            motor_cmd[real_idx].kd = 0. # type: ignore
         self.low_cmd_buffer.crc = get_crc(self.low_cmd_buffer)
         self.low_cmd_pub.publish(self.low_cmd_buffer)
     """ Done: functions that actually publish the commands and take effect """
