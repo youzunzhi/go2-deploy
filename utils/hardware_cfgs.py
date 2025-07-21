@@ -22,7 +22,7 @@ ROS_TOPICS = {
     "LOW_CMD": "/lowcmd",
     "WIRELESS_CONTROLLER": "/wirelesscontroller",
     "DEPTH_IMAGE": "/forward_depth_image",
-    "SPORT_MODE": "/api/sport_mode/request",
+    "SPORT_MODE": "/api/sport/request",
     "MOTION_SWITCHER": "/api/motion_switcher/request",
 }
 

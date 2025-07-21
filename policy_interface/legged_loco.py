@@ -36,7 +36,7 @@ class LeggedLocoPolicyInterface(BasePolicyInterface):
         model = torch.jit.load(model_path, map_location=self.device)  # type: ignore
         model.eval()
 
-        self.policy = model.actor_critic.act_inference
+        self.policy = model
 
     def _load_configs(self):
         config_path = osp.join(self.logdir, "params/env.yaml")
