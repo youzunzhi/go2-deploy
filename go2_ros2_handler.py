@@ -421,9 +421,12 @@ class Go2ROS2Handler:
         self.low_cmd_pub.publish(self.low_cmd_buffer)
     """ Done: functions that actually publish the commands and take effect """
 
-    def log_info(self, message, **kwargs):
+    def log_info(self, message, once=False, **kwargs):
         """Convenient logging method for info messages"""
-        self.node.get_logger().info(message, **kwargs)
+        if once:
+            self.node.get_logger().info(message, once=True)
+        else:
+            self.node.get_logger().info(message, **kwargs)
     
     def log_warn(self, message, **kwargs):
         """Convenient logging method for warning messages"""

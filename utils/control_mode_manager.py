@@ -22,31 +22,49 @@ class ControlModeManager:
         self.policy_interface = policy_interface
         self.which_mode = "sport" # "sport"|"stand"|"locomotion"
         self.stand_controller = StandController(handler)
+        
+        # Button state tracking to prevent spam
+        self.last_button_state = 0
+        self.button_logged = {}
+        
+        # Show initial control prompts
+        self._show_sport_mode_prompts()
 
     def sport_mode_before_locomotion(self):
         """ Handle sport mode operations based on controller input.
         Return True if the sport mode is switched to stand policy.
         """
         if self.which_mode == "sport":
-            if (self.handler.joy_stick_buffer.keys & WirelessButtons.R1):
-                self.handler.log_info("In the sport mode, R1 pressed, robot will stand up.")
+            current_button = self.handler.joy_stick_buffer.keys
+            
+            if (current_button & WirelessButtons.R1):
+                if not (self.last_button_state & WirelessButtons.R1):
+                    self.handler.log_info("R1 pressed: Robot standing up. Press R2 to sit down, or L1 for stand policy.")
                 self.handler._sport_mode_command(ROBOT_SPORT_API_ID_STANDUP)
-            if (self.handler.joy_stick_buffer.keys & WirelessButtons.R2):
-                self.handler.log_info("In the sport mode, R2 pressed, robot will sit down.")
+            if (current_button & WirelessButtons.R2):
+                if not (self.last_button_state & WirelessButtons.R2):
+                    self.handler.log_info("R2 pressed: Robot sitting down. Press R1 to stand up, or L1 for stand policy.")
                 self.handler._sport_mode_command(ROBOT_SPORT_API_ID_STANDDOWN)
-            if (self.handler.joy_stick_buffer.keys & WirelessButtons.X):
-                self.handler.log_info("In the sport mode, X pressed, robot will balance stand.")
+            if (current_button & WirelessButtons.X):
+                if not (self.last_button_state & WirelessButtons.X):
+                    self.handler.log_info("X pressed: Robot balancing stand.")
                 self.handler._sport_mode_command(ROBOT_SPORT_API_ID_BALANCESTAND)
-            if (self.handler.joy_stick_buffer.keys & WirelessButtons.L1):
-                self.handler.log_info("Exist the sport mode. Switch to stand policy.")
+            if (current_button & WirelessButtons.L1):
+                if not (self.last_button_state & WirelessButtons.L1):
+                    self.handler.log_info("L1 pressed: Switching to stand policy.")
                 self.switch_to_stand_policy()
+                
+            self.last_button_state = current_button
 
         if self.which_mode == "stand":
             self.stand_controller.send_stand_action()
 
-            if (self.handler.joy_stick_buffer.keys & WirelessButtons.Y):
-                self.handler.log_info("Y pressed, use the locomotion policy")
+            current_button = self.handler.joy_stick_buffer.keys
+            if (current_button & WirelessButtons.Y):
+                if not (self.last_button_state & WirelessButtons.Y):
+                    self.handler.log_info("Y pressed: Activating locomotion policy...")
                 self.switch_to_locomotion_policy()
+            self.last_button_state = current_button
                     
     def switch_to_sport_mode(self):
         """Switch to sport mode from other modes"""
@@ -54,31 +72,61 @@ class ControlModeManager:
         self.handler.reset_obs()
         self.handler._sport_mode_switch(1)
         self.handler._sport_mode_command(ROBOT_SPORT_API_ID_BALANCESTAND)
+        self._show_sport_mode_prompts()
         
     def switch_to_stand_policy(self):
         """Switch to stand policy from sport mode"""
         self.which_mode = "stand"
         self.stand_controller.reset_stand_sequence()
         self.handler._sport_mode_switch(0)
+        self._show_stand_mode_prompts()
         
     def switch_to_locomotion_policy(self):
         """Switch to locomotion policy from other modes"""
         self.which_mode = "locomotion"
         self.policy_interface.policy_iter_counter = 0
         self.warm_up_for_locomotion_policy()
+        self._show_locomotion_mode_prompts()
 
     def sport_mode_after_locomotion(self):
         """Switch to sport mode after locomotion if L2 is pressed
         return True if the sport mode is switched to sport mode
         """
-        if (self.handler.joy_stick_buffer.keys & WirelessButtons.L2):
-            self.handler.log_info("L2 pressed, stop using locomotion policy, switch to sport mode.")
+        current_button = self.handler.joy_stick_buffer.keys
+        if (current_button & WirelessButtons.L2):
+            if not (self.last_button_state & WirelessButtons.L2):
+                self.handler.log_info("L2 pressed: Returning to sport mode...")
             self.switch_to_sport_mode()
+        self.last_button_state = current_button
 
     def warm_up_for_locomotion_policy(self):
         warm_up_iter = 2
         for _ in range(warm_up_iter):
             _ = self.policy_interface.get_action()
+    
+    def _show_sport_mode_prompts(self):
+        """Show control prompts for sport mode"""
+        self.handler.log_info("\n=== SPORT MODE ===\n" +
+                             "Controls:\n" +
+                             "  R1: Stand up\n" +
+                             "  R2: Sit down\n" +
+                             "  X:  Balance stand\n" +
+                             "  L1: Switch to stand policy")
+    
+    def _show_stand_mode_prompts(self):
+        """Show control prompts for stand mode"""
+        self.handler.log_info("\n=== STAND POLICY MODE ===\n" +
+                             "Robot is preparing for locomotion...\n" +
+                             "Controls:\n" +
+                             "  Y:  Switch to locomotion policy\n" +
+                             "  L2: Return to sport mode")
+    
+    def _show_locomotion_mode_prompts(self):
+        """Show control prompts for locomotion mode"""
+        self.handler.log_info("\n=== LOCOMOTION POLICY MODE ===\n" +
+                             "AI locomotion is active.\n" +
+                             "Controls:\n" +
+                             "  L2: Return to sport mode")
 
 
 class StandController:
