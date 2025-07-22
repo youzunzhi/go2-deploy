@@ -11,16 +11,10 @@ This is a robotics deployment system for the Unitree Go2 quadruped robot designe
 **Primary Objective**: Create a unified deployment system that can load and run RL policies from different training environments with minimal configuration changes.
 
 **Current Focus**: 
-- Clean and restructure the handler file (`go2_ros2_handler.py`) for better readability and maintainability
-- Code organization and optimization
-- Testing and debugging the multi-policy system
-- Performance optimization and timing improvements
-
-**System Status**: 
-- Policy interface abstraction implemented
-- Multi-policy loading system in place
-- Configuration management refactored
-- Handler system needs cleanup and optimization
+- Testing the Go2 base policy from ~/legged-loco/logs/rsl_rl/go2_base/2025-07-03_21-32-44_XXX/exported/policy.jit
+- Validating legged-loco policy interface integration between simulation training and hardware deployment
+- Ensuring consistent joint mappings, control parameters, and observation spaces for legged-loco policies
+- Real-world performance testing and validation of Go2 base locomotion
 
 ## Architecture
 
@@ -28,16 +22,12 @@ This is a robotics deployment system for the Unitree Go2 quadruped robot designe
 
 - **`main.py`** - Main runner class (`Go2Runner`) orchestrating the control loop and system initialization
 - **`go2_ros2_handler.py`** - ROS2 handler managing robot communication, sensor data processing, motor control, and observation collection
-- **`policy_interface/`** - Modular policy interface system supporting multiple training environments:
-  - `base.py` - Abstract base class for policy interfaces
-  - `EPO.py` - Extreme-Parkour-Onboard policy implementation
-  - `legged_loco.py` - IsaacLab/legged-loco policy implementation
-  - `__init__.py` - Factory function for policy interface selection
+- **`policy_interface/legged_loco.py`** - IsaacLab/legged-loco policy implementation (CURRENT TESTING FOCUS)
+- **`policy_interface/base.py`** - Abstract base class for policy interfaces
+- **`policy_interface/__init__.py`** - Factory function for policy interface selection
 - **`utils/control_mode_manager.py`** - State management for robot operational modes (sport/stand/locomotion)
 - **`utils/config.py`** - Configuration utilities and joint mapping
 - **`utils/hardware.py`** - Hardware-specific constants and limits
-- **`visual_node.py`** - Visual processing pipeline for Intel RealSense depth camera integration
-- **`weight-and-cfg/`** - Neural network weights and configuration files organized by policy source
 
 ### Control Flow
 
@@ -45,9 +35,7 @@ This is a robotics deployment system for the Unitree Go2 quadruped robot designe
 2. **Policy Interface**: Detects and loads appropriate policy based on logdir path
 3. **Configuration Loading**: Policy interface provides handler configuration (joint maps, PID gains, scaling, etc.)
 4. **ROS Setup**: Handler initializes ROS2 publishers, subscribers, and communication
-5. **Control Loop**: 50Hz main loop with configurable timing modes:
-   - **ROS Timer**: Standard ROS2-managed timing
-   - **Manual Control**: Precise timing for high-performance operation
+5. **Control Loop**: 50Hz main loop for consistent control frequency matching simulation training
 6. **Mode Management**: Sport mode manager handles state transitions based on controller input:
    - **Sport Mode**: Built-in Unitree behaviors (stand, sit, balance)
    - **Stand Policy**: Neural network-based standing with disturbance rejection
@@ -65,17 +53,14 @@ class BasePolicyInterface:
     def get_action() -> action_tensor
 ```
 
-### Supported Policy Sources
+### Current Policy Source
 
-1. **Extreme-Parkour-Onboard (EPO)**
-   - Configuration: `weight-and-cfg/EPO/config.json`
-   - Models: `base_jit.pt`, `vision_weight.pt`
-   - Features: Depth vision integration, history encoding, state estimation
-
-2. **legged-loco (IsaacLab)** 
-   - Configuration: `weight-and-cfg/legged-loco/params/`
-   - Models: `policy.jit`
-   - Features: Locomotion policies
+**legged-loco (IsaacLab)** - CURRENT TESTING FOCUS
+- Source: `~/legged-loco/logs/rsl_rl/go2_base/2025-07-03_21-32-44_XXX/exported/policy.jit`
+- Configuration: `weight-and-cfg/legged-loco/params/`
+- Features: Go2 base locomotion (no vision), 9-step history, 50Hz control
+- Training details: RSL-RL with PPO, trained in Isaac Lab simulation
+- Critical requirement: Consistent joint mappings and control parameters between simulation and hardware
 
 ### Directory Structure
 ```
@@ -83,28 +68,21 @@ go2-deploy/
 ├── main.py                 # Main runner and entry point
 ├── go2_ros2_handler.py     # ROS2 handler and robot control
 ├── go2_controller.py       # Controller utilities
-├── visual_node.py          # Visual processing pipeline
 ├── policy_interface/       # Policy abstraction system
 │   ├── __init__.py         # Factory function for policy selection
 │   ├── base.py             # Abstract base class
-│   ├── EPO.py              # Extreme-Parkour-Onboard implementation
-│   └── legged_loco.py      # IsaacLab implementation
+│   └── legged_loco.py      # IsaacLab implementation (CURRENT TESTING FOCUS)
 ├── utils/                  # Utility modules
 │   ├── __init__.py
 │   ├── config.py           # Configuration utilities and joint mapping
 │   ├── hardware.py         # Hardware constants and limits
 │   └── control_mode_manager.py # Robot mode state management
 ├── weight-and-cfg/         # Neural network weights and configurations
-│   ├── EPO/                # Extreme-Parkour-Onboard policies
-│   │   ├── config.json
-│   │   ├── base_jit.pt
-│   │   └── vision_weight.pt
-│   ├── legged-loco/        # IsaacLab policies
-│   │   ├── params/
-│   │   │   ├── agent.yaml
-│   │   │   └── env.yaml
-│   │   └── policy.jit
-│   └── [future-sources]/   # Additional training environments
+│   └── legged-loco/        # IsaacLab policies (CURRENT TESTING FOCUS)
+│       ├── params/
+│       │   ├── agent.yaml
+│       │   └── env.yaml
+│       └── policy.jit      # Copy from ~/legged-loco training outputs
 ├── aarch64/                # ARM64 architecture binaries
 │   └── crc_module.so
 ├── x86/                    # x86_64 architecture binaries
@@ -113,6 +91,10 @@ go2-deploy/
 ├── README.md               # Project readme
 ├── QUICKSTART.md           # Quick start guide
 └── LICENSE                 # License file
+
+External Dependencies:
+├── ~/legged-loco/          # Training repository (read-only)
+│   └── logs/rsl_rl/go2_base/2025-07-03_21-32-44_XXX/exported/policy.jit
 ```
 
 ## Development Commands
@@ -120,20 +102,14 @@ go2-deploy/
 ### Running the System
 
 ```bash
-# Run with EPO policy
-python main.py --logdir weight-and-cfg/EPO
-
-# Run with legged-loco policy  
+# Run with legged-loco policy (CURRENT TESTING FOCUS)
 python main.py --logdir weight-and-cfg/legged-loco
 
-# With specific timing mode
-python main.py --timing_mode ros_timer  # or manual_control
-
 # Debug mode without robot movement
-python main.py --dryrun
+python main.py --logdir weight-and-cfg/legged-loco --dryrun
 
 # Specify device
-python main.py --device cuda  # or cpu
+python main.py --logdir weight-and-cfg/legged-loco --device cuda  # or cpu
 ```
 
 ### Controller Input
@@ -181,24 +157,24 @@ python main.py --device cuda  # or cpu
 - Safety systems and motor control
 
 ### Immediate Tasks
-1. **Handler Refactoring**: Clean up `go2_ros2_handler.py` structure and readability
-2. **Testing and Debugging**: Validate multi-policy system functionality
-3. **Performance Optimization**: Reduce computational overhead and improve timing
-4. **Code Documentation**: Enhance inline documentation and type hints
-5. **Error Handling**: Improve robustness and error recovery
+1. **Policy Integration Testing**: Validate legged-loco policy loading and execution
+2. **Joint Mapping Verification**: Ensure consistent joint order between simulation and hardware
+3. **Control Parameter Validation**: Verify 50Hz control frequency and observation history handling
+4. **Real Robot Testing**: Test Go2 base locomotion performance on hardware
+5. **Performance Analysis**: Monitor policy execution timing and robot response
 
 ## File Structure and Development Guidelines
 
 ### Core Files
 - **`main.py`**: Main runner and argument parsing
-- **`go2_ros2_handler.py`**: ROS2 communication and robot control *(CURRENT CLEANUP TARGET)*
-- **`policy_interface/`**: Policy abstraction system
+- **`go2_ros2_handler.py`**: ROS2 communication and robot control
+- **`policy_interface/legged_loco.py`**: legged-loco policy implementation *(CURRENT TESTING FOCUS)*
 - **`utils/`**: Utility modules (config, hardware, sport mode management)
 
 ### Development Principles
-- **Read-only external repositories**: Never modify legged-loco or Extreme-Parkour-Onboard code
+- **Read-only external repositories**: Never modify legged-loco training code in ~/legged-loco
+- **Simulation consistency**: Maintain exact consistency between simulation training parameters and hardware deployment
 - **Clean abstractions**: Maintain clear separation between policy logic and robot control
-- **Backward compatibility**: Ensure changes don't break existing policy support
 - **Safety first**: Always maintain hardware safety limits and emergency controls
 
 ### Configuration Management
@@ -206,11 +182,11 @@ python main.py --device cuda  # or cpu
 - **Policy-specific configs**: Each policy interface handles its own configuration format
 - **Automatic detection**: System automatically selects appropriate policy interface based on logdir path
 
-### Handler Cleanup Goals
-The `go2_ros2_handler.py` file is the current focus for cleanup and should be refactored for:
-- Better code organization and structure
-- Improved readability and maintainability  
-- Clearer separation of concerns
-- Enhanced documentation
-- Reduced complexity in large methods
-- More concise and clear code structure
+### Testing Goals for legged-loco Integration
+The current focus is testing the Go2 base policy deployment:
+- Validate policy loading from ~/legged-loco training outputs
+- Ensure joint mappings match between IsaacLab simulation and Unitree hardware
+- Verify observation space consistency (9-step history, joint positions, velocities)
+- Test control frequency consistency (50Hz matching simulation)
+- Validate action space scaling and clipping
+- Monitor real-world locomotion performance and stability
