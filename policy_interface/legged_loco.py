@@ -12,6 +12,12 @@ class LeggedLocoPolicyInterface(BasePolicyInterface):
         self._load_configs()
         self._load_model()
         
+        # Initialize history buffer for proprioception observations
+        self.history_length = 9  # from agent.yaml
+        self.proprio_obs_dim = 45  # base_ang_vel(3) + base_rpy(3) + commands(3) + joint_pos(12) + joint_vel(12) + last_actions(12)
+        self.proprio_obs_buf = torch.zeros(1, self.history_length, self.proprio_obs_dim, 
+                                         dtype=torch.float, device=self.device)
+        
     def get_action(self):
         self.policy_iter_counter += 1
         obs = self._get_obs()
@@ -27,16 +33,26 @@ class LeggedLocoPolicyInterface(BasePolicyInterface):
         last_actions = self.handler.get_last_actions_obs()
         commands = self.handler.get_xyyaw_command()
         
-        obs = torch.cat([ang_vel, base_rpy, commands, dof_pos, dof_vel, last_actions], dim=-1)
-
-        return obs
+        # Current proprioception observation (45 dims)
+        current_obs = torch.cat([ang_vel, base_rpy, commands, dof_pos, dof_vel, last_actions], dim=-1)
+        
+        # Update history buffer (roll and append current)
+        self.proprio_obs_buf = torch.cat([
+            self.proprio_obs_buf[:, 1:],  # Remove oldest
+            current_obs.unsqueeze(1)      # Add current as newest
+        ], dim=1)
+        
+        # Flatten history buffer and concatenate with current obs
+        history_obs = self.proprio_obs_buf.view(1, -1)  # Shape: (1, 9*45)
+        full_obs = torch.cat([current_obs, history_obs], dim=-1)  # Shape: (1, 45+405=450)
+        
+        return full_obs
         
     def _load_model(self):
         model_path = os.path.join(self.logdir, "policy.jit")
-        model = torch.jit.load(model_path, map_location=self.device)  # type: ignore
-        model.eval()
-
-        self.policy = model
+        # Load the original JIT model - it actually works fine with correct input size!
+        self.policy = torch.jit.load(model_path, map_location=self.device)
+        self.policy.eval()
 
     def _load_configs(self):
         config_path = osp.join(self.logdir, "params/env.yaml")
