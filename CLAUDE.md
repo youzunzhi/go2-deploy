@@ -11,10 +11,12 @@ This is a robotics deployment system for the Unitree Go2 quadruped robot designe
 **Primary Objective**: Create a unified deployment system that can load and run RL policies from different training environments with minimal configuration changes.
 
 **Current Focus**: 
-- Testing the Go2 base policy from ~/legged-loco/logs/rsl_rl/go2_base/2025-07-03_21-32-44_XXX/exported/policy.jit
-- Validating legged-loco policy interface integration between simulation training and hardware deployment
-- Ensuring consistent joint mappings, control parameters, and observation spaces for legged-loco policies
-- Real-world performance testing and validation of Go2 base locomotion
+- Refactoring vision-related code for improved readability and clarity
+- Testing vision pipeline functionality with Extreme-Parkour-Onboard policies that use Intel RealSense D435i depth images
+- Validating depth image processing and visual-motor coordination for parkour locomotion
+
+**Future goal**: 
+- Deploy legged-loco vision policies (secondary priority)
 
 ## Architecture
 
@@ -22,7 +24,8 @@ This is a robotics deployment system for the Unitree Go2 quadruped robot designe
 
 - **`main.py`** - Main runner class (`Go2Runner`) orchestrating the control loop and system initialization
 - **`go2_ros2_handler.py`** - ROS2 handler managing robot communication, sensor data processing, motor control, and observation collection
-- **`policy_interface/legged_loco.py`** - IsaacLab/legged-loco policy implementation (CURRENT TESTING FOCUS)
+- **`policy_interface/legged_loco.py`** - IsaacLab/legged-loco policy implementation (base locomotion tested successfully)
+- **Vision processing pipeline** - Depth image processing and integration with RL policies (CURRENT REFACTORING FOCUS)
 - **`policy_interface/base.py`** - Abstract base class for policy interfaces
 - **`policy_interface/__init__.py`** - Factory function for policy interface selection
 - **`utils/control_mode_manager.py`** - State management for robot operational modes (sport/stand/locomotion)
@@ -53,14 +56,20 @@ class BasePolicyInterface:
     def get_action() -> action_tensor
 ```
 
-### Current Policy Source
+### Policy Sources
 
-**legged-loco (IsaacLab)** - CURRENT TESTING FOCUS
+**legged-loco (IsaacLab)** - Base policy successfully deployed
 - Source: `~/legged-loco/logs/rsl_rl/go2_base/2025-07-03_21-32-44_XXX/exported/policy.jit`
 - Configuration: `weight-and-cfg/legged-loco/params/`
 - Features: Go2 base locomotion (no vision), 9-step history, 50Hz control
-- Training details: RSL-RL with PPO, trained in Isaac Lab simulation
-- Critical requirement: Consistent joint mappings and control parameters between simulation and hardware
+- Status: Base locomotion policy successfully validated on hardware
+
+**Extreme-Parkour-Onboard (legged_gym)** - CURRENT TESTING FOCUS
+- Source: `~/Extreme-Parkour-Onboard/traced/` (vision-based policies)
+- Features: Parkour locomotion with Intel RealSense D435i depth images, visual-motor coordination
+- Input: Depth images (87x58 resolution) + proprioceptive observations
+- Training details: Trained in legged_gym with vision-based obstacle navigation
+- Critical requirement: Vision pipeline refactoring for clarity and robust depth image processing
 
 ### Directory Structure
 ```
@@ -78,7 +87,7 @@ go2-deploy/
 │   ├── hardware.py         # Hardware constants and limits
 │   └── control_mode_manager.py # Robot mode state management
 ├── weight-and-cfg/         # Neural network weights and configurations
-│   └── legged-loco/        # IsaacLab policies (CURRENT TESTING FOCUS)
+│   └── legged-loco/        # IsaacLab policies (base policy successfully deployed)
 │       ├── params/
 │       │   ├── agent.yaml
 │       │   └── env.yaml
@@ -95,6 +104,8 @@ go2-deploy/
 External Dependencies:
 ├── ~/legged-loco/          # Training repository (read-only)
 │   └── logs/rsl_rl/go2_base/2025-07-03_21-32-44_XXX/exported/policy.jit
+├── ~/Extreme-Parkour-Onboard/  # Vision-based parkour training repository (read-only)
+│   └── traced/             # Vision policy weights for testing
 ```
 
 ## Development Commands
@@ -102,14 +113,17 @@ External Dependencies:
 ### Running the System
 
 ```bash
-# Run with legged-loco policy (CURRENT TESTING FOCUS)
+# Run with legged-loco policy (base policy successfully tested)
 python main.py --logdir weight-and-cfg/legged-loco
 
+# Run with Extreme-Parkour-Onboard vision policy (CURRENT TESTING FOCUS)
+python main.py --logdir ~/Extreme-Parkour-Onboard/traced
+
 # Debug mode without robot movement
-python main.py --logdir weight-and-cfg/legged-loco --dryrun
+python main.py --logdir <policy_path> --dryrun
 
 # Specify device
-python main.py --logdir weight-and-cfg/legged-loco --device cuda  # or cpu
+python main.py --logdir <policy_path> --device cuda  # or cpu
 ```
 
 ### Controller Input
@@ -157,36 +171,39 @@ python main.py --logdir weight-and-cfg/legged-loco --device cuda  # or cpu
 - Safety systems and motor control
 
 ### Immediate Tasks
-1. **Policy Integration Testing**: Validate legged-loco policy loading and execution
-2. **Joint Mapping Verification**: Ensure consistent joint order between simulation and hardware
-3. **Control Parameter Validation**: Verify 50Hz control frequency and observation history handling
-4. **Real Robot Testing**: Test Go2 base locomotion performance on hardware
-5. **Performance Analysis**: Monitor policy execution timing and robot response
+1. **Vision Code Refactoring**: Improve readability and clarity of vision processing pipeline
+2. **Extreme-Parkour Policy Testing**: Deploy and test vision-based parkour policies with RealSense D435i
+3. **Depth Image Processing**: Validate depth image capture, preprocessing, and integration with RL policies
+4. **Visual-Motor Coordination**: Test parkour locomotion with visual obstacle detection and navigation
+5. **Performance Analysis**: Monitor vision pipeline timing and policy execution performance
 
 ## File Structure and Development Guidelines
 
 ### Core Files
 - **`main.py`**: Main runner and argument parsing
 - **`go2_ros2_handler.py`**: ROS2 communication and robot control
-- **`policy_interface/legged_loco.py`**: legged-loco policy implementation *(CURRENT TESTING FOCUS)*
+- **`policy_interface/legged_loco.py`**: legged-loco policy implementation *(base policy successfully deployed)*
+- **Vision processing components**: Depth image processing and visual-motor integration *(CURRENT REFACTORING FOCUS)*
 - **`utils/`**: Utility modules (config, hardware, sport mode management)
 
 ### Development Principles
-- **Read-only external repositories**: Never modify legged-loco training code in ~/legged-loco
+- **Read-only external repositories**: Never modify training code in ~/legged-loco or ~/Extreme-Parkour-Onboard
 - **Simulation consistency**: Maintain exact consistency between simulation training parameters and hardware deployment
-- **Clean abstractions**: Maintain clear separation between policy logic and robot control
+- **Clean abstractions**: Maintain clear separation between policy logic, vision processing, and robot control
 - **Safety first**: Always maintain hardware safety limits and emergency controls
+- **Vision pipeline clarity**: Prioritize readable and maintainable vision processing code
 
 ### Configuration Management
 - **Do not modify configuration files**: Configuration files in weight-and-cfg/ are copied from simulation training and should remain unchanged
 - **Policy-specific configs**: Each policy interface handles its own configuration format
 - **Automatic detection**: System automatically selects appropriate policy interface based on logdir path
 
-### Testing Goals for legged-loco Integration
-The current focus is testing the Go2 base policy deployment:
-- Validate policy loading from ~/legged-loco training outputs
-- Ensure joint mappings match between IsaacLab simulation and Unitree hardware
-- Verify observation space consistency (9-step history, joint positions, velocities)
-- Test control frequency consistency (50Hz matching simulation)
-- Validate action space scaling and clipping
-- Monitor real-world locomotion performance and stability
+### Vision Pipeline Refactoring Goals
+The current focus is improving vision-related code and testing Extreme-Parkour policies:
+- Refactor vision processing code for improved readability and maintainability  
+- Test Extreme-Parkour-Onboard policies with Intel RealSense D435i depth camera
+- Validate depth image capture, processing, and integration with visual-motor policies
+- Ensure consistent vision pipeline between simulation training and hardware deployment
+- Test parkour locomotion capabilities with visual obstacle navigation
+- Monitor vision processing performance and real-time constraints (depth images at 100Hz)
+- Future: Integrate legged-loco vision policies after vision pipeline stabilization

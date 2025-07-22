@@ -1,42 +1,30 @@
 # Go2 Deployment System
 
-Deploy reinforcement learning policies on the Unitree Go2 quadruped robot adapt from https://github.com/change-every/Extreme-Parkour-Onboard.
+A unified deployment system for reinforcement learning policies on the Unitree Go2 quadruped robot. This codebase is adapted from [Extreme-Parkour-Onboard](https://github.com/change-every/Extreme-Parkour-Onboard).
 
-## Quick Start
+## Project Goal
 
-### Put weights and config files in `weight-and-config/`
+Create a unified deployment system that can load and run RL policies from different training environments (legged_gym, IsaacLab) with minimal configuration changes. The system provides a clean policy interface abstraction to handle the complexity of different training frameworks while maintaining consistent hardware deployment.
 
-### Implement configuration loading and parsing
-- In `load_configuration` in `main.py`, implement how your config file should be load and parse to get the configs needed in Go2ROS2Node
-    - The joint order in simulation should be correctly specified in load_and_parse_configuration by joint_names
-    - The control type of your policy output is target position relative to the default joint positions
-    - The duration is set to fixed 0.02s, assuming dt=0.005 and decimation=4 in sim
+## Current Status
 
-```bash
-# Basic execution
-python main.py
+**✅ Successfully Completed:**
+- legged-loco base locomotion policy deployment and validation
 
-# Test without robot movement
-python main.py --dryrun
-```
+**🚧 Currently in Development:**
+- Vision pipeline refactoring for improved readability and clarity
+- Testing vision-based policies from Extreme-Parkour-Onboard
+- Deploy legged-loco vision policies
+- Extended multi-environment policy support
 
-## Controller Commands
+## Development Status
 
-- **R1**: Sport Mode (built-in Unitree behaviors)
-- **R2**: Stand Policy (neural network standing)
-- **X**: Locomotion Policy (AI-powered walking)
-- **Start**: Emergency stop
+This repository is actively under development and testing. Usage manuals and detailed documentation will be provided after the development and testing phase is completed.
 
+## Acknowledgments
 
-## Dependencies
+This codebase is adapted from the excellent work at [Extreme-Parkour-Onboard](https://github.com/change-every/Extreme-Parkour-Onboard). Special thanks to the original authors for their contributions to legged robot deployment.
 
-- ROS2
-- PyTorch
-- Intel RealSense SDK
-- Unitree Go2 SDK
+## Safety Notice
 
-## Safety
-
-- Use `--dryrun` for testing without robot movement
-- **Start** button provides emergency stop
-- Always test policies in simulation first
+This system controls a physical robot. Always ensure proper safety measures are in place during development and testing.
