@@ -46,7 +46,6 @@ class Go2Runner:
         # Print configuration information
         self.log_system_info()
 
-        self.handler.start_ros_handlers()   
 
 
     def main_loop(self):

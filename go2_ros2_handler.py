@@ -56,7 +56,6 @@ def get_euler_xyz(q):
     return roll, pitch, yaw
 
     
-
 class Go2ROS2Handler:
     def __init__(self,
         joint_map: list,
@@ -72,7 +71,7 @@ class Go2ROS2Handler:
         self.device = device
         
         # Create ROS2 node instance using composition
-        self.node = rclpy.create_node("unitree_ros2_real")
+        self.node = rclpy.create_node("go2_ros2_handler")
 
         # Store configuration parameters directly as attributes
         self.joint_map = joint_map
@@ -87,13 +86,12 @@ class Go2ROS2Handler:
 
         self.NUM_JOINTS = len(self.joint_map) # number of joints (12)
 
+        self.joint_pos_limit_high_sim, self.joint_pos_limit_low_sim, self.torque_limit_sim = get_joint_limits_in_sim_order(self.joint_map, self.device)
+
+        self.init_ros_communication()
         self.init_buffers()
 
-        ###################### hardware related #####################
-        # Setup joint position and torque limits
-        self.joint_pos_limit_high_sim, self.joint_pos_limit_low_sim, self.torque_limit_sim = get_joint_limits_in_sim_order(self.joint_map, self.device)
-    
-    def start_ros_handlers(self):
+    def init_ros_communication(self):
         """ after initializing the env and policy, register ros related callbacks and topics
         """
 
@@ -427,12 +425,9 @@ class Go2ROS2Handler:
         self.low_cmd_pub.publish(self.low_cmd_buffer)
     """ Done: functions that actually publish the commands and take effect """
 
-    def log_info(self, message, once=False, **kwargs):
+    def log_info(self, message, **kwargs):
         """Convenient logging method for info messages"""
-        if once:
-            self.node.get_logger().info(message, once=True)
-        else:
-            self.node.get_logger().info(message, **kwargs)
+        self.node.get_logger().info(message, **kwargs)
     
     def log_warn(self, message, **kwargs):
         """Convenient logging method for warning messages"""

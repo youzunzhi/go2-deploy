@@ -69,7 +69,7 @@ class VisualNode(Node):
 
         self.parse_args()
         self.start_pipeline()
-        self.start_ros_handlers()
+        self.init_ros_communication()
 
     def parse_args(self):
         # self.output_resolution = self.cfg["depth"]["resized"]
@@ -113,7 +113,7 @@ class VisualNode(Node):
             self.rs_temporal_filter,
         ]
 
-    def start_ros_handlers(self):
+    def init_ros_communication(self):
         self.depth_input_pub = self.create_publisher(
             Image,
             self.depth_input_topic,

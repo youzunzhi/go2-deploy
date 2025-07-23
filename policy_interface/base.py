@@ -34,7 +34,6 @@ class BasePolicyInterface:
     def get_action(self):
         raise NotImplementedError("Subclasses must implement this method")
     
-    
     def reset_policy_iter_counter(self):
         """Reset the policy iteration counter to 0"""
         self.policy_iter_counter = 0
