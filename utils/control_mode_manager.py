@@ -100,9 +100,9 @@ class ControlModeManager:
         self.last_button_state = current_button
 
     def warm_up_for_locomotion_policy(self):
-        warm_up_iter = 2
-        for _ in range(warm_up_iter):
+        for _ in range(self.policy_interface.warm_up_iter):
             _ = self.policy_interface.get_action()
+        self.policy_interface.policy_iter_counter = 0
     
     def _show_sport_mode_prompts(self):
         """Show control prompts for sport mode"""

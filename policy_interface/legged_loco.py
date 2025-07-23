@@ -18,6 +18,8 @@ class LeggedLocoPolicyInterface(BasePolicyInterface):
         self.proprio_obs_buf = torch.zeros(1, self.history_length, self.proprio_obs_dim, 
                                          dtype=torch.float, device=self.device)
         
+        self.warm_up_iter = 10
+
     def get_action(self):
         self.policy_iter_counter += 1
         obs = self._get_obs()

@@ -16,10 +16,12 @@ class EPOPolicyInterface(BasePolicyInterface):
         depth_encoder = self._load_vision_model()
         self.obs_manager = ObsManager(device, depth_encoder, estimator, hist_encoder, self.n_hist_len, self.n_proprio, self.obs_scales)
 
+        self.warm_up_iter = 10
+
     def get_action(self):
-        self.policy_iter_counter += 1
         obs = self._get_obs()
         action = self._get_action_from_obs(obs)
+        self.policy_iter_counter += 1
         return action
     
     def _get_obs(self):
@@ -101,12 +103,12 @@ class EPOPolicyInterface(BasePolicyInterface):
             "RL_calf_joint",    # 11
         ]
         self.joint_map = get_joint_map_from_names(joint_names)
-        default_joint_pos_dict = full_config.get("init_state", {}).get("default_joint_angles", {})
+        default_joint_pos_dict = full_config["init_state"]["default_joint_angles"]
         self.default_joint_pos = parse_default_joint_pos_dict(default_joint_pos_dict, joint_names)
-        self.kp = full_config.get("control", {}).get("stiffness", {}).get("joint", 40.)
-        self.kd = full_config.get("control", {}).get("damping", {}).get("joint", 1.)
-        self.action_scale = full_config.get("control", {}).get("action_scale", 0.25)
-        self.clip_obs = full_config["normalization"]["clip_obs"]
+        self.kp = float(full_config["control"]["stiffness"]["joint"])
+        self.kd = float(full_config["control"]["damping"]["joint"])
+        self.action_scale = float(full_config["control"]["action_scale"])
+        self.clip_obs = full_config["normalization"]["clip_observations"]
         self.clip_actions = full_config["normalization"]["clip_actions"]
 
         self.n_hist_len = full_config["env"]["history_len"]
@@ -132,6 +134,7 @@ class ObsManager:
         self.obs_scales = obs_scales
 
         self.last_depth_image = None
+        self.depth_latent_yaw = None
         self.proprio_history_buf = torch.zeros(1, self.n_hist_len, self.n_proprio, device=self.device, dtype=torch.float)
         self.episode_length_buf = torch.zeros(1, device=self.device, dtype=torch.float)
 
@@ -141,12 +144,14 @@ class ObsManager:
         proprio = self.get_proprio(ang_vel, base_rpy, dof_pos, dof_vel, last_actions, contact)
         if policy_iter_counter % self.visual_update_interval == 0:
             if policy_iter_counter == 0:
-                last_depth_image = depth_image
-            depth_latent_yaw = self.depth_encoder(last_depth_image, proprio)
-        self.last_depth_image = depth_image
+                self.last_depth_image = depth_image
+            assert self.last_depth_image is not None
+            self.depth_latent_yaw = self.depth_encoder(self.last_depth_image, proprio)
+            self.last_depth_image = depth_image
         # Separate depth features and yaw angle
-        depth_latent = depth_latent_yaw[:, :-2]
-        yaw = depth_latent_yaw[:, -2:] * 1.5
+        assert self.depth_latent_yaw is not None
+        depth_latent = self.depth_latent_yaw[:, :-2]
+        yaw = self.depth_latent_yaw[:, -2:] * 1.5
         
         # Update yaw angle in proprioceptive data
         proprio[:, 6:8] = yaw
@@ -268,5 +273,6 @@ class RecurrentDepthBackbone(nn.Module):
         return depth_latent
 
     def detach_hidden_states(self):
+        assert self.hidden_states is not None
         self.hidden_states = self.hidden_states.detach().clone()
 
