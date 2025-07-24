@@ -59,13 +59,14 @@ class BasePolicyInterface:
 ### Policy Sources
 
 **legged-loco (IsaacLab)** - Base policy successfully deployed
-- Source: `~/legged-loco/logs/rsl_rl/go2_base/2025-07-03_21-32-44_XXX/exported/policy.jit`
-- Configuration: `weight-and-cfg/legged-loco/params/`
+- Source: `~/legged-loco/logs/rsl_rl/go2_base/2025-07-03_21-32-44_XXX/`
+- Directory for weight and configs loading: `weight-and-cfg/legged-loco/`
 - Features: Go2 base locomotion (no vision), 9-step history, 50Hz control
 - Status: Base locomotion policy successfully validated on hardware
 
 **Extreme-Parkour-Onboard (legged_gym)** - CURRENT TESTING FOCUS
 - Source: `~/Extreme-Parkour-Onboard/traced/` (vision-based policies)
+- Directory for weight and configs loading: `weight-and-cfg/EPO/`
 - Features: Parkour locomotion with Intel RealSense D435i depth images, visual-motor coordination
 - Input: Depth images (87x58 resolution) + proprioceptive observations
 - Training details: Trained in legged_gym with vision-based obstacle navigation
