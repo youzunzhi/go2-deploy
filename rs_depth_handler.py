@@ -60,7 +60,6 @@ class RSDepthHandler:
             rs_temporal_filter,
         ]
 
-
     def get_depth_image(self, device="cpu"):
         """Capture and process depth image, returning it as a tensor
         

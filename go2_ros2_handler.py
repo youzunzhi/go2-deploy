@@ -67,6 +67,7 @@ class Go2ROS2Handler:
         device="cpu",
         dryrun=True, # if True, the robot will not send commands to the real robot
         enable_depth_capture=False, # if True, initialize RealSense pipeline for depth capture
+        depth_resolution: Optional[tuple] = None, # (width, height) for depth image resolution
     ):
         self.device = device
         
@@ -84,6 +85,7 @@ class Go2ROS2Handler:
 
         self.dryrun = dryrun
         self.enable_depth_capture = enable_depth_capture
+        self.depth_resolution = depth_resolution
 
         self.NUM_JOINTS = len(self.joint_map) # number of joints (12)
 
@@ -155,6 +157,20 @@ class Go2ROS2Handler:
             if hasattr(self, "low_state_buffer") and hasattr(self, "joy_stick_buffer"):
                 break
         self.log_info("Low state and wireless message received, the robot is ready to go.")
+        
+    def init_depth_handler(self):
+        """Initialize the depth handler for RealSense camera capture"""
+        if self.depth_resolution is None:
+            raise ValueError("Depth resolution must be provided when depth capture is enabled")
+        
+        try:
+            from rs_depth_handler import RSDepthHandler
+            self.depth_handler = RSDepthHandler(output_resolution=self.depth_resolution)
+            self.log_info(f"Depth handler initialized successfully with resolution {self.depth_resolution}")
+        except Exception as e:
+            self.log_error(f"Failed to initialize depth handler: {e}")
+            self.enable_depth_capture = False
+            raise
 
     def init_buffers(self):
         self.xyyaw_command = torch.zeros(1, 3, device=self.device, dtype=torch.float32)
@@ -316,18 +332,7 @@ class Go2ROS2Handler:
         if self.depth_handler is None:
             raise RuntimeError("Depth handler is not initialized.")
         return self.depth_handler.get_depth_image(device=self.device)
-    
-    def init_depth_handler(self):
-        """Initialize the depth handler for RealSense camera capture"""
-        try:
-            from rs_depth_handler import RSDepthHandler
-            # EPO policies use 87x58 depth resolution
-            self.depth_handler = RSDepthHandler(output_resolution=(87, 58))
-            self.log_info("Depth handler initialized successfully")
-        except Exception as e:
-            self.log_error(f"Failed to initialize depth handler: {e}")
-            self.enable_depth_capture = False
-            raise
+
 
     def clip_actions_by_joint_limits(self, robot_coordinates_action):
         """

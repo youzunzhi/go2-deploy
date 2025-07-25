@@ -24,7 +24,7 @@ class Go2Runner:
         self.policy_interface = get_policy_interface(logdir, device)
 
         # Get configs for handler
-        joint_map, default_joint_pos, kp, kd, action_scale, clip_obs, clip_actions = self.policy_interface.get_configs_for_handler()
+        joint_map, default_joint_pos, kp, kd, action_scale, clip_obs, clip_actions, enable_depth_capture, depth_resolution = self.policy_interface.get_configs_for_handler()
 
         self.handler = Go2ROS2Handler(
             joint_map=joint_map,
@@ -36,6 +36,8 @@ class Go2Runner:
             action_scale=action_scale,
             clip_obs=clip_obs,
             clip_actions=clip_actions,
+            enable_depth_capture=enable_depth_capture,
+            depth_resolution=depth_resolution,
         )
 
         # Set handler to policy interface

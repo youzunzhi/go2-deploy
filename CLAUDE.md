@@ -191,6 +191,7 @@ python main.py --logdir <policy_path> --device cuda  # or cpu
 - **Read-only external repositories**: Never modify training code in ~/legged-loco or ~/Extreme-Parkour-Onboard
 - **Simulation consistency**: Maintain exact consistency between simulation training parameters and hardware deployment
 - **Clean abstractions**: Maintain clear separation between policy logic, vision processing, and robot control
+- **Policy interface isolation**: The handler should not be aware of specific policy interfaces - all policy-specific configuration must come through the interface's get_configs_for_handler() method
 - **Safety first**: Always maintain hardware safety limits and emergency controls
 - **Vision pipeline clarity**: Prioritize readable and maintainable vision processing code
 

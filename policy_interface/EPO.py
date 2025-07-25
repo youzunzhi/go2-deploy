@@ -18,6 +18,10 @@ class EPOPolicyInterface(BasePolicyInterface):
 
         self.warm_up_iter = 10
 
+    def get_depth_config(self):
+        """EPO policies require depth capture with specific resolution"""
+        return True, self.depth_resolution
+
     def get_action(self):
         obs = self._get_obs()
         action = self._get_action_from_obs(obs)
@@ -114,6 +118,9 @@ class EPOPolicyInterface(BasePolicyInterface):
         self.n_hist_len = full_config["env"]["history_len"]
         self.n_proprio = full_config["env"]["n_proprio"]
         self.obs_scales = full_config["normalization"]["obs_scales"]
+        
+        # Depth image configuration
+        self.depth_resolution = tuple(full_config["depth"]["resized"])  # (width, height)
 
 
 class ObsManager:
