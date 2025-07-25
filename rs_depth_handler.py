@@ -1,16 +1,32 @@
 import rclpy
+import torch
+import numpy as np
 from sensor_msgs.msg import Image
 from std_msgs.msg import Float32MultiArray
 import pyrealsense2 as rs
+import torch.nn.functional as F
 
 from utils.hardware_cfgs import ROS_TOPICS
 
+@torch.no_grad()
+def resize2d(img, size):
+    return F.adaptive_avg_pool2d(img, size)
+
 class RSDepthHandler:
-    def __init__(self):
+    def __init__(self, output_resolution: tuple):
+        """
+        Args:
+            output_resolution: [width, height] of the output depth image
+        """
         self.rs_stream_width = 640
         self.rs_stream_height = 480
         self.rs_stream_fps = 30
-        
+        self.cropping = [60, 100, 80, 36] # top, bottom, left, right
+        depth_range_m = [0.0, 3.0]
+        self.depth_range = (depth_range_m[0] * 1000, depth_range_m[1] * 1000) # [m] -> [mm]
+        self.output_resolution = output_resolution
+        self.log_config()
+
         self.node = rclpy.create_node("rs_depth_handler")
 
         self.start_rs_pipeline()
@@ -71,13 +87,30 @@ class RSDepthHandler:
         for rs_filter in self.rs_filters:
             depth_frame = rs_filter.process(depth_frame)
         
-        depth_image_pyt = torch.from_numpy(np.asanyarray(depth_frame.get_data()).astype(np.float32)).unsqueeze(0)
-        
+        depth_image_tensor = torch.from_numpy(np.asanyarray(depth_frame.get_data()).astype(np.float32)).unsqueeze(0)
+
+        depth_image_tensor = depth_image_tensor[:,
+            self.cropping[0]: -self.cropping[1]-1,
+            self.cropping[2]: -self.cropping[3]-1,
+        ]
+
+        depth_image_tensor = torch.clip(depth_image_tensor, self.depth_range[0], self.depth_range[1]) / (self.depth_range[1] - self.depth_range[0])
+        depth_image_tensor = resize2d(depth_image_tensor, self.output_resolution)
+        depth_image_tensor -= 0.5 # [-0.5, 0.5])
 
         depth_msg = Float32MultiArray()
-        depth_msg.data = depth_data.flatten().detach().cpu().numpy().tolist()
+        depth_msg.data = depth_image_tensor.flatten().detach().cpu().numpy().tolist()
 
         self.forward_depth_image_pub.publish(depth_msg)
+
+    def log_config(self):
+        self.log_info("rs_depth_handler initialized")
+        self.log_info("rs_stream_width: {}".format(self.rs_stream_width))
+        self.log_info("rs_stream_height: {}".format(self.rs_stream_height))
+        self.log_info("rs_stream_fps: {}".format(self.rs_stream_fps))
+        self.log_info("cropping: {}".format(self.cropping))
+        self.log_info("depth_range: {}".format(self.depth_range))
+        self.log_info("output_resolution: {}".format(self.output_resolution))
 
     def log_info(self, message, **kwargs):
         """Convenient logging method for info messages"""
