@@ -24,6 +24,11 @@ ROS_TOPICS = {
     "DEPTH_IMAGE": "/forward_depth_image",
     "SPORT_MODE": "/api/sport/request",
     "MOTION_SWITCHER": "/api/motion_switcher/request",
+    # LiDAR相关话题 (基于Unitree SDK2)
+    "LIDAR_HEIGHTMAP": "rt/lidar/heightmap",  # 预处理的height map
+    "LIDAR_POINTCLOUD": "rt/lidar/pointcloud",  # 原始点云数据
+    "LIDAR_STATE": "rt/lidar/state",  # LiDAR状态
+    "LIDAR_SWITCH": "rt/utlidar/switch",  # LiDAR开关控制
 }
 
 HARDWARE_ORDER = {

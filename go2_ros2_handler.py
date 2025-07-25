@@ -11,6 +11,22 @@ from unitree_api.msg import Request
 
 from std_msgs.msg import Float32MultiArray
 
+# Import LiDAR message types from Unitree SDK2
+try:
+    from unitree_sdk2py.idl.unitree_go.msg.dds_ import HeightMap_
+    from unitree_sdk2py.idl.sensor_msgs.msg.dds_ import PointCloud2_
+    from unitree_sdk2py.idl.unitree_go.msg.dds_ import LidarState_
+    from unitree_sdk2py.idl.std_msgs.msg.dds_ import String_
+    from unitree_sdk2py.core.channel import ChannelSubscriber, ChannelPublisher, ChannelFactoryInitialize
+    UNITREE_SDK2_AVAILABLE = True
+    print("Unitree SDK2 available - LiDAR support enabled")
+except ImportError as e:
+    UNITREE_SDK2_AVAILABLE = False
+    print(f"Unitree SDK2 not available - LiDAR support disabled: {e}")
+
+# Import LiDAR height map processor
+from lidar_height_map_processor import LiDARHeightMapProcessor
+
 if os.uname().machine in ["x86_64", "amd64"]:
     sys.path.append(os.path.join(
         os.path.dirname(os.path.abspath(__file__)),
@@ -144,6 +160,16 @@ class Go2ROS2Handler:
             1
         )
 
+        # Initialize LiDAR height map processor for vision policies
+        self.lidar_processor = LiDARHeightMapProcessor(device=self.device)
+        self.lidar_enabled = False
+        
+        # LiDAR subscribers (Unitree SDK2 based)
+        if UNITREE_SDK2_AVAILABLE:
+            self._init_lidar_subscribers()
+        else:
+            self.log_warn("LiDAR support disabled - Unitree SDK2 not available")
+
         self.log_info("ROS handlers started, waiting to recieve critical low state and wireless controller messages.")
         if not self.dryrun:
             self.log_warn(f"You are running the code in no-dryrun mode and publishing to '{low_cmd_topic}', Please keep safe.")
@@ -163,6 +189,9 @@ class Go2ROS2Handler:
         self.actions = torch.zeros(1, self.NUM_JOINTS, device=self.device, dtype=torch.float32)    
         self.contact_filt = torch.ones((1, 4), device=self.device, dtype=torch.float32)
         self.last_contact_filt = torch.ones((1, 4), device=self.device, dtype=torch.float32)
+        
+        # LiDAR related buffers
+        self.height_map_data = torch.zeros(1, 459, device=self.device, dtype=torch.float32)  # 17x27 grid
 
     def reset_obs(self):
         self.xyyaw_command = torch.zeros(1, 3, device=self.device, dtype=torch.float32)
@@ -235,6 +264,92 @@ class Go2ROS2Handler:
 
     def _depth_data_callback(self, msg):
         self.depth_data = torch.tensor(msg.data, dtype=torch.float32).reshape(1, 58, 87).to(self.device)
+    
+    def _init_lidar_subscribers(self):
+        """
+        初始化LiDAR相关的Unitree SDK2订阅者
+        """
+        try:
+            # 初始化Unitree SDK2通道工厂
+            # 注意：这可能需要根据实际网络配置调整
+            # ChannelFactoryInitialize(0, "eth0")  # 替换为实际网络接口
+            
+            # 订阅预处理的height map (首选)
+            self.heightmap_subscriber = ChannelSubscriber(ROS_TOPICS["LIDAR_HEIGHTMAP"], HeightMap_)
+            self.heightmap_subscriber.Init(self._lidar_heightmap_callback, 10)
+            
+            # 订阅原始点云数据 (备用)  
+            self.pointcloud_subscriber = ChannelSubscriber(ROS_TOPICS["LIDAR_POINTCLOUD"], PointCloud2_)
+            self.pointcloud_subscriber.Init(self._lidar_pointcloud_callback, 10)
+            
+            # 订阅LiDAR状态
+            self.lidar_state_subscriber = ChannelSubscriber(ROS_TOPICS["LIDAR_STATE"], LidarState_)
+            self.lidar_state_subscriber.Init(self._lidar_state_callback, 10)
+            
+            # LiDAR控制发布者
+            self.lidar_switch_publisher = ChannelPublisher(ROS_TOPICS["LIDAR_SWITCH"], String_)
+            self.lidar_switch_publisher.Init()
+            
+            self.log_info("LiDAR subscribers initialized successfully")
+            
+        except Exception as e:
+            self.log_warn(f"Failed to initialize LiDAR subscribers: {e}")
+            UNITREE_SDK2_AVAILABLE = False
+    
+    def _lidar_heightmap_callback(self, msg: HeightMap_):
+        """
+        处理Unitree预处理的height map数据
+        """
+        try:
+            self.height_map_data = self.lidar_processor.process_unitree_heightmap(msg)
+            self.lidar_enabled = True
+        except Exception as e:
+            self.log_warn(f"Error processing height map: {e}")
+    
+    def _lidar_pointcloud_callback(self, msg: PointCloud2_):
+        """
+        处理LiDAR点云数据 (备用方案)
+        """
+        try:
+            # 只有在没有height map数据时才使用点云数据
+            if not self.lidar_enabled:
+                self.height_map_data = self.lidar_processor.process_pointcloud_to_heightmap(msg)
+        except Exception as e:
+            self.log_warn(f"Error processing point cloud: {e}")
+    
+    def _lidar_state_callback(self, msg: LidarState_):
+        """
+        处理LiDAR状态信息
+        """
+        # 可以用于监控LiDAR健康状态
+        if msg.error_state != 0:
+            self.log_warn(f"LiDAR error state: {msg.error_state}")
+    
+    def enable_lidar(self):
+        """
+        启用LiDAR
+        """
+        if UNITREE_SDK2_AVAILABLE and hasattr(self, 'lidar_switch_publisher'):
+            try:
+                cmd_msg = String_()
+                cmd_msg.data = "ON"
+                self.lidar_switch_publisher.Write(cmd_msg)
+                self.log_info("LiDAR enabled")
+            except Exception as e:
+                self.log_warn(f"Failed to enable LiDAR: {e}")
+    
+    def disable_lidar(self):
+        """
+        禁用LiDAR
+        """
+        if UNITREE_SDK2_AVAILABLE and hasattr(self, 'lidar_switch_publisher'):
+            try:
+                cmd_msg = String_()
+                cmd_msg.data = "OFF"
+                self.lidar_switch_publisher.Write(cmd_msg)
+                self.log_info("LiDAR disabled")
+            except Exception as e:
+                self.log_warn(f"Failed to disable LiDAR: {e}")
 
     def _sport_mode_command(self, api_id):
         msg = Request()
@@ -314,6 +429,19 @@ class Go2ROS2Handler:
 
     def get_depth_image(self):
         return self.depth_data
+    
+    def get_height_map_obs(self):
+        """
+        获取LiDAR height map观测数据用于vision policy
+        
+        Returns:
+            torch.Tensor: shape (1, 459) 的height map tensor
+        """
+        if self.lidar_enabled and hasattr(self, 'height_map_data'):
+            return self.height_map_data
+        else:
+            # 如果LiDAR未启用或数据不可用，返回零tensor
+            return torch.zeros(1, 459, device=self.device, dtype=torch.float32)
 
     def clip_actions_by_joint_limits(self, robot_coordinates_action):
         """

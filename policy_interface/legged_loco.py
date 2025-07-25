@@ -90,3 +90,116 @@ class LeggedLocoPolicyInterface(BasePolicyInterface):
         self.action_scale = full_config.get("actions", {}).get("joint_pos", {}).get("scale", 0.25)
         self.clip_obs = 100.0
         self.clip_actions = None
+
+
+class LeggedLocoVisionPolicyInterface(BasePolicyInterface):
+    """
+    legged-loco vision policy interface with height map support
+    使用vision_policy.jit和LiDAR height map数据
+    """
+    def __init__(self, logdir, device):
+        super().__init__(logdir, device)
+        self._load_configs()
+        self._load_vision_model()
+        
+        # Initialize history buffer for proprioception observations (与base版本相同)
+        self.history_length = 9
+        self.proprio_obs_dim = 45
+        self.proprio_obs_buf = torch.zeros(1, self.history_length, self.proprio_obs_dim, 
+                                         dtype=torch.float, device=self.device)
+        
+        # Height map dimensions (基于legged-loco分析: 17x27=459)
+        self.height_map_dim = 459
+        
+        self.warm_up_iter = 10
+        print("LeggedLoco Vision Policy Interface initialized with height map support")
+
+    def get_action(self):
+        self.policy_iter_counter += 1
+        obs = self._get_obs()
+        action = self.policy(obs)
+        return action
+
+    def _get_obs(self):
+        """
+        构建包含height map的完整观测空间
+        """
+        assert self.handler is not None, "Handler is not set"
+        
+        # 获取proprioception数据 (与base版本相同)
+        ang_vel = self.handler.get_ang_vel_obs()
+        base_rpy = self.handler.get_base_rpy_obs()
+        dof_pos = self.handler.get_dof_pos_obs()
+        dof_vel = self.handler.get_dof_vel_obs()
+        last_actions = self.handler.get_last_actions_obs()
+        commands = self.handler.get_xyyaw_command()
+        
+        # Current proprioception observation (45 dims)
+        current_obs = torch.cat([ang_vel, base_rpy, commands, dof_pos, dof_vel, last_actions], dim=-1)
+        
+        # Update history buffer (roll and append current)
+        self.proprio_obs_buf = torch.cat([
+            self.proprio_obs_buf[:, 1:],  # Remove oldest
+            current_obs.unsqueeze(1)      # Add current as newest
+        ], dim=1)
+        
+        # Flatten history buffer
+        history_obs = self.proprio_obs_buf.view(1, -1)  # Shape: (1, 9*45=405)
+        
+        # 获取height map数据
+        height_map = self.handler.get_height_map_obs()  # Shape: (1, 459)
+        
+        # 组合所有观测：current_obs(45) + history_obs(405) + height_map(459) = 909维
+        # 注意：实际维度需要根据vision_policy.jit的输入要求调整
+        full_obs = torch.cat([current_obs, history_obs, height_map], dim=-1)
+        
+        # 如果需要调试观测维度，可以打印
+        if self.policy_iter_counter <= 3:  # 只在前几次打印
+            print(f"Vision obs shapes - current: {current_obs.shape}, history: {history_obs.shape}, height_map: {height_map.shape}, full: {full_obs.shape}")
+        
+        return full_obs
+        
+    def _load_vision_model(self):
+        """
+        加载vision policy模型 (vision_policy.jit)
+        """
+        model_path = os.path.join(self.logdir, "vision_policy.jit")
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(f"Vision policy not found at {model_path}")
+        
+        print(f"Loading vision policy from {model_path}")
+        self.policy = torch.jit.load(model_path, map_location=self.device)
+        self.policy.eval()
+
+    def _load_configs(self):
+        """
+        加载配置 (与base版本相同，但用于vision policy)
+        """
+        config_path = osp.join(self.logdir, "params/env.yaml")
+        with open(config_path, "r") as f:
+            full_config = yaml.load(f, Loader=yaml.Loader)
+
+        # legged-loco uses grouped joint order: [all hips, all thighs, all calves]
+        joint_names = [
+            "FL_hip_joint",     # 0
+            "FR_hip_joint",     # 1  
+            "RL_hip_joint",     # 2
+            "RR_hip_joint",     # 3
+            "FL_thigh_joint",   # 4
+            "FR_thigh_joint",   # 5
+            "RL_thigh_joint",   # 6
+            "RR_thigh_joint",   # 7
+            "FL_calf_joint",    # 8
+            "FR_calf_joint",    # 9
+            "RL_calf_joint",    # 10
+            "RR_calf_joint",    # 11
+        ]
+        
+        self.joint_map = get_joint_map_from_names(joint_names)
+        default_joint_pos_dict = full_config.get("scene", {}).get("robot", {}).get("init_state", {}).get("joint_pos", {})
+        self.default_joint_pos = parse_default_joint_pos_dict(default_joint_pos_dict, joint_names)
+        self.kp = full_config.get("scene", {}).get("robot", {}).get("actuators", {}).get("base_legs", {}).get("stiffness", 40.0)
+        self.kd = full_config.get("scene", {}).get("robot", {}).get("actuators", {}).get("base_legs", {}).get("damping", 1.0)
+        self.action_scale = full_config.get("actions", {}).get("joint_pos", {}).get("scale", 0.25)
+        self.clip_obs = 100.0
+        self.clip_actions = None
