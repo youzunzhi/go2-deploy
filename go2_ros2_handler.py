@@ -9,7 +9,6 @@ from unitree_go.msg import (
 )
 from unitree_api.msg import Request
 
-from std_msgs.msg import Float32MultiArray
 
 if os.uname().machine in ["x86_64", "amd64"]:
     sys.path.append(os.path.join(
@@ -67,6 +66,7 @@ class Go2ROS2Handler:
         clip_actions: Optional[float],
         device="cpu",
         dryrun=True, # if True, the robot will not send commands to the real robot
+        enable_depth_capture=False, # if True, initialize RealSense pipeline for depth capture
     ):
         self.device = device
         
@@ -83,11 +83,17 @@ class Go2ROS2Handler:
         self.clip_actions = clip_actions
 
         self.dryrun = dryrun
+        self.enable_depth_capture = enable_depth_capture
 
         self.NUM_JOINTS = len(self.joint_map) # number of joints (12)
 
         self.joint_pos_limit_high_sim, self.joint_pos_limit_low_sim, self.torque_limit_sim = get_joint_limits_in_sim_order(self.joint_map, self.device)
 
+        # Initialize depth handler if enabled
+        self.depth_handler = None
+        if self.enable_depth_capture:
+            self.init_depth_handler()
+        
         self.init_ros_communication()
         self.init_buffers()
 
@@ -136,13 +142,7 @@ class Go2ROS2Handler:
             1,
         )
 
-        # Depth image subscriber (For EPO policy)
-        self.depth_input_sub = self.node.create_subscription(
-            Float32MultiArray,
-            ROS_TOPICS["DEPTH_IMAGE"],
-            self._depth_data_callback,
-            1
-        )
+        # No depth image subscriber needed - we get frames directly from depth_handler
 
         self.log_info("ROS handlers started, waiting to recieve critical low state and wireless controller messages.")
         if not self.dryrun:
@@ -233,8 +233,6 @@ class Go2ROS2Handler:
         # Update the buffer
         self.xyyaw_command = torch.tensor([[vx, vy, yaw]], device=self.device, dtype=torch.float32)
 
-    def _depth_data_callback(self, msg):
-        self.depth_data = torch.tensor(msg.data, dtype=torch.float32).reshape(1, 58, 87).to(self.device)
 
     def _sport_mode_command(self, api_id):
         msg = Request()
@@ -313,7 +311,23 @@ class Go2ROS2Handler:
         return self.contact_filt
 
     def get_depth_image(self):
-        return self.depth_data
+        if not self.enable_depth_capture:
+            raise RuntimeError("Depth capture is not enabled. Set enable_depth_capture=True when initializing the handler.")
+        if self.depth_handler is None:
+            raise RuntimeError("Depth handler is not initialized.")
+        return self.depth_handler.get_depth_image(device=self.device)
+    
+    def init_depth_handler(self):
+        """Initialize the depth handler for RealSense camera capture"""
+        try:
+            from rs_depth_handler import RSDepthHandler
+            # EPO policies use 87x58 depth resolution
+            self.depth_handler = RSDepthHandler(output_resolution=(87, 58))
+            self.log_info("Depth handler initialized successfully")
+        except Exception as e:
+            self.log_error(f"Failed to initialize depth handler: {e}")
+            self.enable_depth_capture = False
+            raise
 
     def clip_actions_by_joint_limits(self, robot_coordinates_action):
         """

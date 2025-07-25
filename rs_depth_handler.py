@@ -1,12 +1,7 @@
-import rclpy
 import torch
 import numpy as np
-from sensor_msgs.msg import Image
-from std_msgs.msg import Float32MultiArray
 import pyrealsense2 as rs
 import torch.nn.functional as F
-
-from utils.hardware_cfgs import ROS_TOPICS
 
 @torch.no_grad()
 def resize2d(img, size):
@@ -27,11 +22,8 @@ class RSDepthHandler:
         self.output_resolution = output_resolution
         self.log_config()
 
-        self.node = rclpy.create_node("rs_depth_handler")
-
         self.start_rs_pipeline()
         self.init_rs_filters()
-        self.init_ros_communication()
 
     def start_rs_pipeline(self):
         self.rs_pipeline = rs.pipeline()
@@ -68,21 +60,22 @@ class RSDepthHandler:
             rs_temporal_filter,
         ]
 
-    def init_ros_communication(self):
-        self.forward_depth_image_pub = self.node.create_publisher(
-            Float32MultiArray,
-            ROS_TOPICS["DEPTH_IMAGE"],
-            1,
-        )
-        self.log_info("rs_depth_handler initialized")
 
-    def publish_depth_image(self):
+    def get_depth_image(self, device="cpu"):
+        """Capture and process depth image, returning it as a tensor
+        
+        Args:
+            device: torch device to place the tensor on
+            
+        Returns:
+            torch.Tensor: processed depth image tensor of shape (1, height, width)
+        """
         latency = 142 # ms
         rs_frame = self.rs_pipeline.wait_for_frames(latency)
         depth_frame = rs_frame.get_depth_frame()
         if not depth_frame:
-            self.log_error("No depth frame", throttle_duration_sec=1)
-            return
+            self.log_error("No depth frame")
+            return None
         
         for rs_filter in self.rs_filters:
             depth_frame = rs_filter.process(depth_frame)
@@ -97,14 +90,11 @@ class RSDepthHandler:
         depth_image_tensor = torch.clip(depth_image_tensor, self.depth_range[0], self.depth_range[1]) / (self.depth_range[1] - self.depth_range[0])
         depth_image_tensor = resize2d(depth_image_tensor, self.output_resolution)
         depth_image_tensor -= 0.5 # [-0.5, 0.5])
-
-        depth_msg = Float32MultiArray()
-        depth_msg.data = depth_image_tensor.flatten().detach().cpu().numpy().tolist()
-
-        self.forward_depth_image_pub.publish(depth_msg)
+        
+        return depth_image_tensor.to(device)
 
     def log_config(self):
-        self.log_info("rs_depth_handler initialized")
+        self.log_info("rs_depth_handler initializing")
         self.log_info("rs_stream_width: {}".format(self.rs_stream_width))
         self.log_info("rs_stream_height: {}".format(self.rs_stream_height))
         self.log_info("rs_stream_fps: {}".format(self.rs_stream_fps))
@@ -112,10 +102,10 @@ class RSDepthHandler:
         self.log_info("depth_range: {}".format(self.depth_range))
         self.log_info("output_resolution: {}".format(self.output_resolution))
 
-    def log_info(self, message, **kwargs):
+    def log_info(self, message):
         """Convenient logging method for info messages"""
-        self.node.get_logger().info(message, **kwargs)
+        print(f"[INFO] RSDepthHandler: {message}")
     
-    def log_error(self, message, **kwargs):
+    def log_error(self, message):
         """Convenient logging method for error messages"""
-        self.node.get_logger().error(message, **kwargs)
+        print(f"[ERROR] RSDepthHandler: {message}")
