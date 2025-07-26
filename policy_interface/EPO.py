@@ -154,6 +154,8 @@ class ObsManager:
                 self.last_depth_image = depth_image
             assert self.last_depth_image is not None
             self.depth_latent_yaw = self.depth_encoder(self.last_depth_image, proprio)
+            if torch.isnan(self.depth_latent_yaw).any():
+                print('depth_latent_yaw contains nan and the depth image is: ', self.last_depth_image)
             self.last_depth_image = depth_image
         # Separate depth features and yaw angle
         assert self.depth_latent_yaw is not None

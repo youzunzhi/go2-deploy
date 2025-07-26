@@ -1,4 +1,5 @@
 import torch
+from unitree_api.msg import Request
 from utils.hardware_cfgs import STAND_STAGE1_DURATION, STAND_STAGE2_DURATION, STAND_TARGET_POS_STAGE1, STAND_TARGET_POS_STAGE2, WirelessButtons
 
 ROBOT_SPORT_API_ID_BALANCESTAND = 1002
@@ -40,15 +41,15 @@ class ControlModeManager:
             if (current_button & WirelessButtons.R1):
                 if not (self.last_button_state & WirelessButtons.R1):
                     self.handler.log_info("R1 pressed: Robot standing up. Press R2 to sit down, or L1 for stand policy.")
-                self.handler._sport_mode_command(ROBOT_SPORT_API_ID_STANDUP)
+                self._sport_mode_command(ROBOT_SPORT_API_ID_STANDUP)
             if (current_button & WirelessButtons.R2):
                 if not (self.last_button_state & WirelessButtons.R2):
                     self.handler.log_info("R2 pressed: Robot sitting down. Press R1 to stand up, or L1 for stand policy.")
-                self.handler._sport_mode_command(ROBOT_SPORT_API_ID_STANDDOWN)
+                self._sport_mode_command(ROBOT_SPORT_API_ID_STANDDOWN)
             if (current_button & WirelessButtons.X):
                 if not (self.last_button_state & WirelessButtons.X):
                     self.handler.log_info("X pressed: Robot balancing stand.")
-                self.handler._sport_mode_command(ROBOT_SPORT_API_ID_BALANCESTAND)
+                self._sport_mode_command(ROBOT_SPORT_API_ID_BALANCESTAND)
             if (current_button & WirelessButtons.L1):
                 if not (self.last_button_state & WirelessButtons.L1):
                     self.handler.log_info("L1 pressed: Switching to stand policy.")
@@ -70,15 +71,15 @@ class ControlModeManager:
         """Switch to sport mode from other modes"""
         self.which_mode = "sport"
         self.handler.reset_obs()
-        self.handler._sport_mode_switch(1)
-        self.handler._sport_mode_command(ROBOT_SPORT_API_ID_BALANCESTAND)
+        self._sport_mode_switch(1)
+        self._sport_mode_command(ROBOT_SPORT_API_ID_BALANCESTAND)
         self._show_sport_mode_prompts()
         
     def switch_to_stand_policy(self):
         """Switch to stand policy from sport mode"""
         self.which_mode = "stand"
         self.stand_controller.reset_stand_sequence()
-        self.handler._sport_mode_switch(0)
+        self._sport_mode_switch(0)
         self._show_stand_mode_prompts()
         
     def switch_to_locomotion_policy(self):
@@ -127,6 +128,45 @@ class ControlModeManager:
                              "AI locomotion is active.\n" +
                              "Controls:\n" +
                              "  L2: Return to sport mode")
+
+    def _sport_mode_command(self, api_id):
+        """Send sport mode command to robot"""
+        msg = Request()
+
+        msg.header.identity.id = 0
+        msg.header.identity.api_id = api_id
+        msg.header.lease.id = 0
+        msg.header.policy.priority = 0
+        msg.header.policy.noreply = False
+
+        msg.parameter = ''
+        msg.binary = []
+
+        self.handler.sport_mode_pub.publish(msg)
+    
+    def _sport_mode_switch(self, mode):
+        """Switch between sport mode and low-level control mode"""
+        msg = Request()
+
+        # Fill the header
+        msg.header.identity.id = 0
+        msg.header.lease.id = 0
+        msg.header.policy.priority = 0
+        msg.header.policy.noreply = False
+
+        if mode == 0:
+            # Release mode (switch to low-level control mode) - use api_id 1003
+            msg.header.identity.api_id = 1003
+            msg.parameter = '{}'
+        elif mode == 1:
+            # Select sport mode - use api_id 1002
+            msg.header.identity.api_id = 1002
+            msg.parameter = '{"name": "mcf"}'
+        
+        msg.binary = []
+
+        # Publish to motion switcher instead of robot state
+        self.handler.motion_switcher_pub.publish(msg)
 
 
 class StandController:

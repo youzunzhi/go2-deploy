@@ -24,7 +24,6 @@ from crc_module import get_crc  # type: ignore
 
 import numpy as np
 import torch
-import time
 
 from utils.hardware_cfgs import ROS_TOPICS, get_joint_limits_in_sim_order
 
@@ -160,17 +159,10 @@ class Go2ROS2Handler:
         
     def init_depth_handler(self):
         """Initialize the depth handler for RealSense camera capture"""
-        if self.depth_resolution is None:
-            raise ValueError("Depth resolution must be provided when depth capture is enabled")
-        
-        try:
-            from rs_depth_handler import RSDepthHandler
-            self.depth_handler = RSDepthHandler(output_resolution=self.depth_resolution)
-            self.log_info(f"Depth handler initialized successfully with resolution {self.depth_resolution}")
-        except Exception as e:
-            self.log_error(f"Failed to initialize depth handler: {e}")
-            self.enable_depth_capture = False
-            raise
+        assert self.depth_resolution is not None, "Depth resolution must be provided when depth capture is enabled"
+        from rs_depth_handler import RSDepthHandler
+        self.depth_handler = RSDepthHandler(output_resolution=self.depth_resolution)
+        self.log_info(f"Depth handler initialized successfully with resolution {self.depth_resolution}")
 
     def init_buffers(self):
         self.xyyaw_command = torch.zeros(1, 3, device=self.device, dtype=torch.float32)
@@ -249,56 +241,20 @@ class Go2ROS2Handler:
         # Update the buffer
         self.xyyaw_command = torch.tensor([[vx, vy, yaw]], device=self.device, dtype=torch.float32)
 
-
-    def _sport_mode_command(self, api_id):
-        msg = Request()
-
-        msg.header.identity.id = 0
-        msg.header.identity.api_id = api_id
-        msg.header.lease.id = 0
-        msg.header.policy.priority = 0
-        msg.header.policy.noreply = False
-
-        msg.parameter = ''
-        msg.binary = []
-
-        self.sport_mode_pub.publish(msg)
-    
-    def _sport_mode_switch(self, mode):
-        msg = Request()
-
-        # Fill the header
-        msg.header.identity.id = 0
-        msg.header.lease.id = 0
-        msg.header.policy.priority = 0
-        msg.header.policy.noreply = False
-
-        if mode == 0:
-            # Release mode (switch to low-level control mode) - use api_id 1003
-            msg.header.identity.api_id = 1003
-            msg.parameter = '{}'
-        elif mode == 1:
-            # Select sport mode - use api_id 1002
-            msg.header.identity.api_id = 1002
-            msg.parameter = '{"name": "mcf"}'
-        
-        msg.binary = []
-
-        # Publish to motion switcher instead of robot state
-        self.motion_switcher_pub.publish(msg)
-
-    """ Done: ROS callbacks and handlers that update the buffer """
-
-    """ refresh observation buffer and corresponding sub-functions """
+    # Observation retrieval methods for policy interface
+    # These methods extract sensor data from ROS buffers and format them as PyTorch tensors
 
     def get_xyyaw_command(self):
+        """Get joystick velocity command (x, y, yaw)"""
         return self.xyyaw_command
     
     def get_ang_vel_obs(self):
+        """Get angular velocity from IMU gyroscope data"""
         ang_vel = torch.from_numpy(self.low_state_buffer.imu_state.gyroscope).unsqueeze(0).to(device=self.device, dtype=torch.float32)
         return ang_vel
 
     def get_base_rpy_obs(self):
+        """Get base orientation as roll-pitch-yaw from IMU quaternion"""
         quat_xyzw = torch.tensor([
             self.low_state_buffer.imu_state.quaternion[1],
             self.low_state_buffer.imu_state.quaternion[2],
@@ -310,15 +266,19 @@ class Go2ROS2Handler:
         return base_rpy
 
     def get_dof_pos_obs(self):
+        """Get joint positions relative to default pose"""
         return (self.dof_pos_ - self.default_joint_pos.unsqueeze(0))
     
     def get_dof_vel_obs(self):
+        """Get joint velocities"""
         return self.dof_vel_
     
     def get_last_actions_obs(self):
+        """Get previous action for temporal consistency"""
         return self.actions
 
     def get_contact_filt_obs(self):
+        """Get filtered foot contact states based on force threshold"""
         for i in range(4):
             if self.low_state_buffer.foot_force[i] < 25:
                 self.contact_filt[:, i] = -0.5
@@ -327,12 +287,10 @@ class Go2ROS2Handler:
         return self.contact_filt
 
     def get_depth_image(self):
-        if not self.enable_depth_capture:
-            raise RuntimeError("Depth capture is not enabled. Set enable_depth_capture=True when initializing the handler.")
-        if self.depth_handler is None:
-            raise RuntimeError("Depth handler is not initialized.")
+        """Get depth image from RealSense camera for vision-based policies"""
+        assert self.enable_depth_capture, "Depth capture is not enabled. Set enable_depth_capture=True when initializing the handler."
+        assert self.depth_handler is not None, "Depth handler is not initialized."
         return self.depth_handler.get_depth_image(device=self.device)
-
 
     def clip_actions_by_joint_limits(self, robot_coordinates_action):
         """
