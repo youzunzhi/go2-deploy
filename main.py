@@ -45,10 +45,19 @@ class Go2Runner:
 
         self.control_mode_manager = ControlModeManager(self.handler, self.policy_interface)
         
+        # Warm up policy once at startup (similar to Extreme-Parkour-Onboard)
+        self._warmup_policy()
+        
         # Print configuration information
         self.log_system_info()
 
-
+    def _warmup_policy(self):
+        """Warm up policy at startup to avoid slow first iterations"""
+        assert hasattr(self.policy_interface, 'warm_up_iter'), "Policy interface must have warm_up_iter attribute"
+        for _ in range(self.policy_interface.warm_up_iter):
+            _ = self.policy_interface.get_action()
+        self.policy_interface.policy_iter_counter = 0
+        self.handler.log_info(f"Policy warmed up with {self.policy_interface.warm_up_iter} iterations")
 
     def main_loop(self):
         """Main control loop for the Go2 robot - handles different operational modes based on joystick input"""

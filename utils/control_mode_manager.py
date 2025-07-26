@@ -86,7 +86,6 @@ class ControlModeManager:
         """Switch to locomotion policy from other modes"""
         self.which_mode = "locomotion"
         self.policy_interface.policy_iter_counter = 0
-        self.warm_up_for_locomotion_policy()
         self._show_locomotion_mode_prompts()
 
     def sport_mode_after_locomotion(self):
@@ -100,10 +99,6 @@ class ControlModeManager:
             self.switch_to_sport_mode()
         self.last_button_state = current_button
 
-    def warm_up_for_locomotion_policy(self):
-        for _ in range(self.policy_interface.warm_up_iter):
-            _ = self.policy_interface.get_action()
-        self.policy_interface.policy_iter_counter = 0
     
     def _show_sport_mode_prompts(self):
         """Show control prompts for sport mode"""

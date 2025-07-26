@@ -89,14 +89,14 @@ class Go2ROS2Handler:
         self.NUM_JOINTS = len(self.joint_map) # number of joints (12)
 
         self.joint_pos_limit_high_sim, self.joint_pos_limit_low_sim, self.torque_limit_sim = get_joint_limits_in_sim_order(self.joint_map, self.device)
+        
+        self.init_buffers()
+        self.init_ros_communication()
 
         # Initialize depth handler if enabled
         self.depth_handler = None
         if self.enable_depth_capture:
             self.init_depth_handler()
-        
-        self.init_ros_communication()
-        self.init_buffers()
 
     def init_ros_communication(self):
         """ after initializing the env and policy, register ros related callbacks and topics
