@@ -11,12 +11,14 @@ This is a robotics deployment system for the Unitree Go2 quadruped robot designe
 **Primary Objective**: Create a unified deployment system that can load and run RL policies from different training environments with minimal configuration changes.
 
 **Current Focus**: 
-- Refactoring vision-related code for improved readability and clarity
-- Testing vision pipeline functionality with Extreme-Parkour-Onboard policies that use Intel RealSense D435i depth images
-- Validating depth image processing and visual-motor coordination for parkour locomotion
+- Deploy legged-loco vision policies using Go2's onboard LiDAR sensor for heightmap generation
+- Expand legged-loco policy interface to support vision-based observations consistent with ../legged-loco training
+- Implement heightmap publisher for Go2's LiDAR sensor data processing and publishing
 
-**Future goal**: 
-- Deploy legged-loco vision policies (secondary priority)
+**Completed Goals**: 
+- ✅ Vision-related code refactoring for improved readability and clarity
+- ✅ Extreme-Parkour-Onboard (EPO) policy testing with Intel RealSense D435i depth images
+- ✅ Depth image processing validation and visual-motor coordination for parkour locomotion
 
 ## Architecture
 
@@ -59,19 +61,21 @@ class BasePolicyInterface:
 
 ### Policy Sources
 
-**legged-loco (IsaacLab)** - Base policy successfully deployed
-- Source: `~/legged-loco/logs/rsl_rl/go2_base/2025-07-03_21-32-44_XXX/`
-- Directory for weight and configs loading: `weight-and-cfg/legged-loco/`
-- Features: Go2 base locomotion (no vision), 9-step history, 50Hz control
-- Status: Base locomotion policy successfully validated on hardware
+**legged-loco (IsaacLab)** - CURRENT FOCUS: Vision Policy Deployment
+- Source: `~/legged-loco/logs/rsl_rl/go2_vision/` (vision-based policies)
+- Directory for weight and configs loading: `weight-and-cfg/legged-loco-base/` (base policy), future: `weight-and-cfg/legged-loco-vision/`
+- Features: 
+  - ✅ Base policy: Go2 base locomotion (no vision), 9-step history, 50Hz control - **Successfully validated on hardware**
+  - 🔄 Vision policy: Go2 locomotion with LiDAR-based heightmaps for terrain awareness
+- Input: LiDAR heightmaps + proprioceptive observations (consistent with ../legged-loco training)
+- Next steps: Expand policy interface for vision obs, implement heightmap publisher, extend ROS2 handler
 
-**Extreme-Parkour-Onboard (legged_gym)** - CURRENT TESTING FOCUS
+**Extreme-Parkour-Onboard (legged_gym)** - COMPLETED TESTING
 - Source: `~/Extreme-Parkour-Onboard/traced/` (vision-based policies)
 - Directory for weight and configs loading: `weight-and-cfg/EPO/`
 - Features: Parkour locomotion with Intel RealSense D435i depth images, visual-motor coordination
 - Input: Depth images (87x58 resolution) + proprioceptive observations
-- Training details: Trained in legged_gym with vision-based obstacle navigation
-- Critical requirement: Vision pipeline refactoring for clarity and robust depth image processing
+- Status: ✅ **Successfully tested - vision pipeline refactored and EPO policy deployment validated**
 
 ### Directory Structure
 ```
@@ -89,11 +93,13 @@ go2-deploy/
 │   ├── hardware.py         # Hardware constants and limits
 │   └── control_mode_manager.py # Robot mode state management
 ├── weight-and-cfg/         # Neural network weights and configurations
-│   └── legged-loco/        # IsaacLab policies (base policy successfully deployed)
-│       ├── params/
-│       │   ├── agent.yaml
-│       │   └── env.yaml
-│       └── policy.jit      # Copy from ~/legged-loco training outputs
+│   ├── legged-loco-base/   # IsaacLab base policies (successfully deployed)
+│   │   ├── params/
+│   │   │   ├── agent.yaml
+│   │   │   └── env.yaml
+│   │   └── policy.jit      # Copy from ~/legged-loco base training outputs
+│   ├── legged-loco-vision/ # IsaacLab vision policies (future implementation)
+│   └── EPO/                # Extreme-Parkour-Onboard policies (successfully tested)
 ├── aarch64/                # ARM64 architecture binaries
 │   └── crc_module.so
 ├── x86/                    # x86_64 architecture binaries
@@ -105,9 +111,11 @@ go2-deploy/
 
 External Dependencies:
 ├── ~/legged-loco/          # Training repository (read-only)
-│   └── logs/rsl_rl/go2_base/2025-07-03_21-32-44_XXX/exported/policy.jit
+│   ├── logs/rsl_rl/go2_base/2025-07-03_21-32-44_XXX/exported/policy.jit  # Base policy (deployed)
+│   └── logs/rsl_rl/go2_vision/                                           # Vision policy (next focus)
 ├── ~/Extreme-Parkour-Onboard/  # Vision-based parkour training repository (read-only)
-│   └── traced/             # Vision policy weights for testing
+│   └── traced/             # Vision policy weights (successfully tested)
+├── ~/unitree_sdk2_python/  # Unitree SDK reference for LiDAR integration
 ```
 
 ## Development Commands
@@ -115,11 +123,14 @@ External Dependencies:
 ### Running the System
 
 ```bash
-# Run with legged-loco policy (base policy successfully tested)
-python main.py --logdir weight-and-cfg/legged-loco
+# Run with legged-loco base policy (successfully tested)
+python main.py --logdir weight-and-cfg/legged-loco-base
 
-# Run with Extreme-Parkour-Onboard vision policy (CURRENT TESTING FOCUS)
-python main.py --logdir ~/Extreme-Parkour-Onboard/traced
+# Run with legged-loco vision policy (CURRENT DEVELOPMENT FOCUS)
+python main.py --logdir weight-and-cfg/legged-loco-vision
+
+# Run with Extreme-Parkour-Onboard vision policy (successfully tested)
+python main.py --logdir weight-and-cfg/EPO
 
 # Debug mode without robot movement
 python main.py --logdir <policy_path> --dryrun
@@ -156,33 +167,52 @@ python main.py --logdir <policy_path> --device cuda  # or cpu
 - x86_64 and aarch64 architectures
 - CRC module for reliable communication
 
-## Depth Image Architecture
+## Vision System Architecture
 
-**NEW IMPLEMENTATION**: Non-blocking depth image capture system with clean architectural separation
+### Depth Image System (EPO Policies) - ✅ COMPLETED
 
-### Components
+**Implementation**: Non-blocking depth image capture system with clean architectural separation
 
 **`depth_publisher.py`** - Three-tier architecture:
 - **`DepthCaptureHandler`**: Pure RealSense camera operations in separate thread
 - **`DepthImagePublisherNode`**: ROS2 node for publishing depth tensors at 100Hz
 - **`DepthImagePublisherRunner`**: Orchestrates both components with lifecycle management
 
-### Process Architecture
+**Process Architecture:**
 - **Separate Process**: Depth publisher runs as independent process via `multiprocessing.Process`
 - **Non-blocking Main Loop**: 50Hz robot control never waits for camera operations
 - **ROS2 Communication**: Uses `/depth_image_tensor` topic with `Float32MultiArray` messages
 - **Thread Safety**: RealSense blocking calls isolated in background thread with proper locking
 
-### Error Handling & Safety
-- **Fail-Fast Design**: Camera errors cause immediate process shutdown
-- **Error Signal Propagation**: Empty messages signal failure to main process
-- **Assertion-Based Failure**: `get_depth_image()` uses assertions to stop main process when vision fails
-- **No Silent Degradation**: System stops rather than operating with stale/missing depth data
-
-### Configuration
+**Configuration:**
 - **RealSense Settings**: 640x480@30fps, depth filtering (hole filling, spatial, temporal)
 - **Processing Pipeline**: Cropping, depth range clipping [0-3m], normalization, resizing
 - **Output Format**: Configurable resolution depth tensors, centered around 0 ([-0.5, 0.5])
+
+### Heightmap System (legged-loco Policies) - 🔄 NEXT IMPLEMENTATION
+
+**Planned Implementation**: Non-blocking LiDAR-based heightmap capture and publishing system
+
+**Future `heightmap_publisher.py`** - Similar architecture to depth publisher:
+- **`HeightmapCaptureHandler`**: Go2 LiDAR sensor operations in separate thread
+- **`HeightmapPublisherNode`**: ROS2 node for publishing heightmap tensors
+- **`HeightmapPublisherRunner`**: Orchestrates both components with lifecycle management
+
+**Process Architecture:**
+- **Separate Process**: Heightmap publisher runs as independent process
+- **Non-blocking Main Loop**: 50Hz robot control never waits for LiDAR operations  
+- **ROS2 Communication**: Uses `/heightmap_tensor` topic with `Float32MultiArray` messages
+- **SDK Integration**: Uses ~/unitree_sdk2_python for Go2 LiDAR sensor access
+
+**Configuration:**
+- **LiDAR Processing**: Point cloud to heightmap conversion, terrain analysis
+- **Output Format**: Heightmap tensors consistent with ../legged-loco training format
+
+### Error Handling & Safety (Both Systems)
+- **Fail-Fast Design**: Sensor errors cause immediate process shutdown
+- **Error Signal Propagation**: Empty messages signal failure to main process
+- **Assertion-Based Failure**: Vision/heightmap getters use assertions to stop main process when sensors fail
+- **No Silent Degradation**: System stops rather than operating with stale/missing sensor data
 
 ## Safety Features
 
@@ -192,33 +222,35 @@ python main.py --logdir <policy_path> --device cuda  # or cpu
 - **Contact force monitoring**: Foot contact detection for safety
 - **Emergency modes**: Controller-based safety shutdown and mode switching
 - **Hardware abstraction**: Safe motor control with configurable PID gains
-- **Vision failure safety**: **NEW** - System stops when depth capture fails to prevent unsafe operation
+- **Vision/sensor failure safety**: System stops when depth/heightmap capture fails to prevent unsafe operation
 
 ## Current Development Status
 
 ### Implementation Status
-- Multi-policy deployment system structure in place
-- Policy interface abstraction implemented
-- Configuration management system refactored
-- ROS2 integration and robot communication
-- **Non-blocking depth image capture system implemented** - **NEW**
-- Sport mode management
-- Safety systems and motor control
+- ✅ Multi-policy deployment system structure in place
+- ✅ Policy interface abstraction implemented  
+- ✅ Configuration management system refactored
+- ✅ ROS2 integration and robot communication
+- ✅ **Non-blocking depth image capture system implemented and tested**
+- ✅ **EPO vision policy deployment validated**
+- ✅ Sport mode management
+- ✅ Safety systems and motor control
 
-### Immediate Tasks
-1. **Vision Code Refactoring**: Improve readability and clarity of vision processing pipeline
-2. **Extreme-Parkour Policy Testing**: Deploy and test vision-based parkour policies with RealSense D435i
-3. **Depth Image Processing**: Validate depth image capture, preprocessing, and integration with RL policies
-4. **Visual-Motor Coordination**: Test parkour locomotion with visual obstacle detection and navigation
-5. **Performance Analysis**: Monitor vision pipeline timing and policy execution performance
+### Current Tasks (legged-loco Vision Policy Deployment)
+1. **Expand legged-loco Policy Interface**: Modify `policy_interface/legged_loco.py` to support vision-based observations consistent with ../legged-loco go2 vision policy training
+2. **Implement Heightmap Publisher**: Create `heightmap_publisher.py` using Go2's onboard LiDAR sensor with architecture similar to `depth_publisher.py`, referencing ~/unitree_sdk2_python
+3. **Extend ROS2 Handler**: Modify `go2_ros2_handler.py` to subscribe to heightmap data and provide it to vision policies through the policy interface
+4. **Configuration Integration**: Ensure heightmap processing parameters match ../legged-loco training environment exactly
+5. **Testing and Validation**: Deploy and test legged-loco vision policies on hardware
 
 ## File Structure and Development Guidelines
 
 ### Core Files
 - **`main.py`**: Main runner and argument parsing
 - **`go2_ros2_handler.py`**: ROS2 communication and robot control
-- **`depth_publisher.py`**: **NEW** - Non-blocking depth image capture with clean architectural separation
-- **`policy_interface/legged_loco.py`**: legged-loco policy implementation *(base policy successfully deployed)*
+- **`depth_publisher.py`**: ✅ Non-blocking depth image capture with clean architectural separation *(EPO policies)*
+- **`heightmap_publisher.py`**: 🔄 Non-blocking LiDAR heightmap capture *(legged-loco vision policies - next implementation)*
+- **`policy_interface/legged_loco.py`**: legged-loco policy implementation *(base policy successfully deployed, vision support next)*
 - **`utils/`**: Utility modules (config, hardware, sport mode management)
 
 ### Development Principles
@@ -235,12 +267,12 @@ python main.py --logdir <policy_path> --device cuda  # or cpu
 - **Policy-specific configs**: Each policy interface handles its own configuration format
 - **Automatic detection**: System automatically selects appropriate policy interface based on logdir path
 
-### Vision Pipeline Refactoring Goals
-The current focus is improving vision-related code and testing Extreme-Parkour policies:
-- Refactor vision processing code for improved readability and maintainability  
-- Test Extreme-Parkour-Onboard policies with Intel RealSense D435i depth camera
-- Validate depth image capture, processing, and integration with visual-motor policies
-- Ensure consistent vision pipeline between simulation training and hardware deployment
-- Test parkour locomotion capabilities with visual obstacle navigation
-- Monitor vision processing performance and real-time constraints (depth images at 100Hz)
-- Future: Integrate legged-loco vision policies after vision pipeline stabilization
+### legged-loco Vision Policy Implementation Goals
+The current focus is implementing legged-loco vision policy support:
+- Expand legged-loco policy interface to handle vision observations (heightmaps from LiDAR)
+- Implement heightmap publisher using Go2's onboard LiDAR sensor (reference ~/unitree_sdk2_python)
+- Extend ROS2 handler to subscribe to heightmap data and provide it to policy interface
+- Ensure heightmap processing exactly matches ../legged-loco training environment
+- Deploy and validate legged-loco vision policies on hardware
+- Maintain consistent sensor data format between training and deployment
+)
