@@ -8,7 +8,7 @@ from multiprocessing import Process
 from go2_ros2_handler import Go2ROS2Handler
 from policy_interface import get_policy_interface
 from utils.control_mode_manager import ControlModeManager
-from depth_publisher import run_depth_publisher_node
+from depth_publisher import run_depth_publisher_process
 
 
 class Go2Runner:
@@ -32,7 +32,7 @@ class Go2Runner:
         joint_map, default_joint_pos, kp, kd, action_scale, clip_obs, clip_actions, enable_depth_capture, depth_resolution = self.policy_interface.get_configs_for_handler()
 
         if enable_depth_capture:
-            self._start_depth_publisher_node(depth_resolution)
+            self._start_depth_publisher_process(depth_resolution)
 
         self.handler = Go2ROS2Handler(
             joint_map=joint_map,
@@ -59,13 +59,13 @@ class Go2Runner:
         # Print configuration information
         self.log_system_info()
         
-    def _start_depth_publisher_node(self, depth_resolution):
+    def _start_depth_publisher_process(self, depth_resolution):
         """Start depth publisher node in a separate process"""
         self.handler.log_info(f"Starting depth publisher node with resolution {depth_resolution}")
         
         # Create and start process for depth publisher node
         self.depth_publisher_process = Process(
-            target=run_depth_publisher_node,
+            target=run_depth_publisher_process,
             args=(depth_resolution,),
             daemon=True
         )

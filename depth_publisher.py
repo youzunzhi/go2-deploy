@@ -113,7 +113,14 @@ class DepthCaptureHandler:
             except Exception as e:
                 if logger:
                     logger.error(f"Error in depth capture loop: {e}")
-                # Continue running despite errors
+                    logger.error("Sending error signal and stopping depth capture")
+                
+                # Send error signal by setting tensor to None
+                with self.tensor_lock:
+                    self.latest_depth_tensor = None
+                
+                self.is_running = False
+                break
                 
     def start_capture(self, logger=None):
         """Start depth image capture in separate thread"""
@@ -197,7 +204,7 @@ class DepthImagePublisherNode(Node):
     Focuses solely on ROS communication and publishing logic.
     """
     
-    def __init__(self, capture_handler: DepthCaptureHandler, publish_rate_hz: float = 100.0):
+    def __init__(self, capture_handler: DepthCaptureHandler):
         """
         Args:
             capture_handler: DepthCaptureHandler instance for getting depth data
@@ -206,7 +213,7 @@ class DepthImagePublisherNode(Node):
         super().__init__('depth_image_publisher')
         
         self.capture_handler = capture_handler
-        self.publish_rate_hz = publish_rate_hz
+        self.publish_rate_hz = 100.0
         self.topic_name = ROS_TOPICS["DEPTH_IMAGE"]
         
         # Create publisher for depth image tensors
@@ -228,16 +235,18 @@ class DepthImagePublisherNode(Node):
         """Publish the latest depth tensor to ROS2 topic"""
         tensor_to_publish = self.capture_handler.get_latest_tensor()
         
-        if tensor_to_publish is None:
-            return  # No data to publish yet
-        
         # Create Float32MultiArray message
         msg = Float32MultiArray()
         
-        # Simply flatten tensor to 1D list - shape is known from configuration
-        msg.data = tensor_to_publish.flatten().tolist()
+        if tensor_to_publish is None:
+            # Send error signal - empty data array will cause failure in subscriber
+            msg.data = []
+            self.get_logger().warn("Publishing empty depth tensor due to capture error")
+        else:
+            # Normal case - flatten tensor to 1D list
+            msg.data = tensor_to_publish.flatten().tolist()
         
-        # Publish
+        # Publish (either normal data or error signal)
         self.depth_publisher.publish(msg)
 
 
@@ -247,20 +256,18 @@ class DepthImagePublisherRunner:
     Provides clean separation of concerns and lifecycle management.
     """
     
-    def __init__(self, output_resolution: tuple, publish_rate_hz: float = 100.0):
+    def __init__(self, output_resolution: tuple):
         """
         Args:
             output_resolution: (width, height) for output depth image
-            publish_rate_hz: Rate to publish depth tensors (Hz)
         """
         self.output_resolution = output_resolution
-        self.publish_rate_hz = publish_rate_hz
         
         # Create capture handler
         self.capture_handler = DepthCaptureHandler(output_resolution)
         
         # Create ROS node
-        self.node = DepthImagePublisherNode(self.capture_handler, publish_rate_hz)
+        self.node = DepthImagePublisherNode(self.capture_handler)
         
         # Log configuration
         self.capture_handler.log_config(self.node.get_logger())
@@ -287,7 +294,7 @@ class DepthImagePublisherRunner:
             self.node.destroy_node()
 
 
-def run_depth_publisher_node(output_resolution: tuple, publish_rate_hz: float = 100.0):
+def run_depth_publisher_process(output_resolution: tuple):
     """
     Function to run depth publisher node in a separate process
     
@@ -299,7 +306,7 @@ def run_depth_publisher_node(output_resolution: tuple, publish_rate_hz: float = 
     
     try:
         # Create and start runner
-        runner = DepthImagePublisherRunner(output_resolution, publish_rate_hz)
+        runner = DepthImagePublisherRunner(output_resolution)
         runner.start()
         
         # Run ROS node (blocking)

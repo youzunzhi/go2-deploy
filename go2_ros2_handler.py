@@ -243,6 +243,12 @@ class Go2ROS2Handler:
     def _depth_image_callback(self, msg):
         """Callback for receiving depth image tensors from depth publisher node"""
         try:
+            # Check for error signal (empty data)
+            if len(msg.data) == 0:
+                self.log_error("Received empty depth tensor - depth capture has failed!")
+                self.depth_tensor = None
+                return
+            
             # Reconstruct tensor from Float32MultiArray message using known shape
             # Shape is (1, height, width) where height, width come from depth_resolution
             height, width = self.depth_resolution[1], self.depth_resolution[0]  # depth_resolution is (width, height)
@@ -253,6 +259,7 @@ class Go2ROS2Handler:
             
         except Exception as e:
             self.log_error(f"Error processing depth image message: {e}")
+            self.depth_tensor = None
     # Observation retrieval methods for policy interface
     # These methods extract sensor data from ROS buffers and format them as PyTorch tensors
 
@@ -302,9 +309,10 @@ class Go2ROS2Handler:
         """Get latest depth image tensor (non-blocking)
         
         Returns:
-            torch.Tensor or None: Latest depth image tensor, or None if no data received yet
+            torch.Tensor: Latest depth image tensor
         """
         assert self.enable_depth_capture, "Depth capture is not enabled."
+        assert self.depth_tensor is not None, "Depth capture has failed - cannot continue vision-based policy"
         
         return self.depth_tensor.clone()  # Return a copy to avoid race conditions
 
