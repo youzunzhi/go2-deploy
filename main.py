@@ -89,8 +89,7 @@ class Go2Runner:
         # Check for safe exit first
         if self.handler.safe_exit_requested:
             self.handler.safe_exit()
-            rclpy.shutdown()
-            return
+            raise KeyboardInterrupt("Safe exit requested")
         
         self.control_mode_manager.sport_mode_before_locomotion()
 
