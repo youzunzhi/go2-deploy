@@ -86,6 +86,12 @@ class Go2Runner:
 
     def main_loop(self):
         """Main control loop for the Go2 robot - handles different operational modes based on joystick input"""
+        # Check for safe exit first
+        if self.handler.safe_exit_requested:
+            self.handler.safe_exit()
+            rclpy.shutdown()
+            return
+        
         self.control_mode_manager.sport_mode_before_locomotion()
 
         if self.control_mode_manager.which_mode == "locomotion":

@@ -26,7 +26,7 @@ from crc_module import get_crc  # type: ignore
 import numpy as np
 import torch
 
-from utils.hardware_cfgs import ROS_TOPICS, get_joint_limits_in_sim_order
+from utils.hardware_cfgs import ROS_TOPICS, get_joint_limits_in_sim_order, WirelessButtons
 
 
 @torch.jit.script  # type: ignore
@@ -86,6 +86,9 @@ class Go2ROS2Handler:
         self.dryrun = dryrun
         self.enable_depth_capture = enable_depth_capture
         self.depth_resolution = depth_resolution
+
+        # Safe exit flag
+        self.safe_exit_requested = False
 
         self.NUM_JOINTS = len(self.joint_map) # number of joints (12)
         
@@ -239,6 +242,11 @@ class Go2ROS2Handler:
 
         # Update the buffer
         self.xyyaw_command = torch.tensor([[vx, vy, yaw]], device=self.device, dtype=torch.float32)
+        
+        # Check for select button press for safe exit
+        if msg.keys & WirelessButtons.select:
+            self.log_warn("SELECT button pressed - initiating safe exit!")
+            self.safe_exit_requested = True
         
     def _depth_image_callback(self, msg):
         """Callback for receiving depth image tensors from depth publisher node"""
@@ -424,6 +432,12 @@ class Go2ROS2Handler:
             motor_cmd[real_idx].kd = 0. # type: ignore
         self.low_cmd_buffer.crc = get_crc(self.low_cmd_buffer)
         self.low_cmd_pub.publish(self.low_cmd_buffer)
+    
+    def safe_exit(self):
+        """Emergency safe exit - turn off motors and signal program to exit"""
+        self.log_warn("Executing safe exit - turning off motors")
+        self._turn_off_motors()
+        self.log_info("Motors turned off safely")
     """ Done: functions that actually publish the commands and take effect """
 
     def log_info(self, message, **kwargs):
