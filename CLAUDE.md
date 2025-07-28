@@ -24,8 +24,8 @@ This is a robotics deployment system for the Unitree Go2 quadruped robot designe
 
 - **`main.py`** - Main runner class (`Go2Runner`) orchestrating the control loop and system initialization
 - **`go2_ros2_handler.py`** - ROS2 handler managing robot communication, sensor data processing, motor control, and observation collection
+- **`depth_publisher.py`** - **NEW**: Non-blocking depth image capture and publishing system with clean architecture separation
 - **`policy_interface/legged_loco.py`** - IsaacLab/legged-loco policy implementation (base locomotion tested successfully)
-- **Vision processing pipeline** - Depth image processing and integration with RL policies (CURRENT REFACTORING FOCUS)
 - **`policy_interface/base.py`** - Abstract base class for policy interfaces
 - **`policy_interface/__init__.py`** - Factory function for policy interface selection
 - **`utils/control_mode_manager.py`** - State management for robot operational modes (sport/stand/locomotion)
@@ -37,9 +37,10 @@ This is a robotics deployment system for the Unitree Go2 quadruped robot designe
 1. **Initialization**: `Go2Runner` creates policy interface, handler, and sport mode manager
 2. **Policy Interface**: Detects and loads appropriate policy based on logdir path
 3. **Configuration Loading**: Policy interface provides handler configuration (joint maps, PID gains, scaling, etc.)
-4. **ROS Setup**: Handler initializes ROS2 publishers, subscribers, and communication
-5. **Control Loop**: 50Hz main loop for consistent control frequency matching simulation training
-6. **Mode Management**: Sport mode manager handles state transitions based on controller input:
+4. **Depth Publisher Setup**: **NEW** - If vision is enabled, starts separate depth publisher process for non-blocking camera operations
+5. **ROS Setup**: Handler initializes ROS2 publishers, subscribers, and communication (including depth image subscription if enabled)
+6. **Control Loop**: 50Hz main loop for consistent control frequency matching simulation training
+7. **Mode Management**: Sport mode manager handles state transitions based on controller input:
    - **Sport Mode**: Built-in Unitree behaviors (stand, sit, balance)
    - **Stand Policy**: Neural network-based standing with disturbance rejection
    - **Locomotion Policy**: AI-powered walking with visual-motor coordination
@@ -77,7 +78,7 @@ class BasePolicyInterface:
 go2-deploy/
 ├── main.py                 # Main runner and entry point
 ├── go2_ros2_handler.py     # ROS2 handler and robot control
-├── go2_controller.py       # Controller utilities
+├── depth_publisher.py      # NEW: Non-blocking depth image capture and publishing
 ├── policy_interface/       # Policy abstraction system
 │   ├── __init__.py         # Factory function for policy selection
 │   ├── base.py             # Abstract base class
@@ -151,6 +152,34 @@ python main.py --logdir <policy_path> --device cuda  # or cpu
 - x86_64 and aarch64 architectures
 - CRC module for reliable communication
 
+## Depth Image Architecture
+
+**NEW IMPLEMENTATION**: Non-blocking depth image capture system with clean architectural separation
+
+### Components
+
+**`depth_publisher.py`** - Three-tier architecture:
+- **`DepthCaptureHandler`**: Pure RealSense camera operations in separate thread
+- **`DepthImagePublisherNode`**: ROS2 node for publishing depth tensors at 100Hz
+- **`DepthImagePublisherRunner`**: Orchestrates both components with lifecycle management
+
+### Process Architecture
+- **Separate Process**: Depth publisher runs as independent process via `multiprocessing.Process`
+- **Non-blocking Main Loop**: 50Hz robot control never waits for camera operations
+- **ROS2 Communication**: Uses `/depth_image_tensor` topic with `Float32MultiArray` messages
+- **Thread Safety**: RealSense blocking calls isolated in background thread with proper locking
+
+### Error Handling & Safety
+- **Fail-Fast Design**: Camera errors cause immediate process shutdown
+- **Error Signal Propagation**: Empty messages signal failure to main process
+- **Assertion-Based Failure**: `get_depth_image()` uses assertions to stop main process when vision fails
+- **No Silent Degradation**: System stops rather than operating with stale/missing depth data
+
+### Configuration
+- **RealSense Settings**: 640x480@30fps, depth filtering (hole filling, spatial, temporal)
+- **Processing Pipeline**: Cropping, depth range clipping [0-3m], normalization, resizing
+- **Output Format**: Configurable resolution depth tensors, centered around 0 ([-0.5, 0.5])
+
 ## Safety Features
 
 - **Dryrun mode**: Testing without robot movement
@@ -159,6 +188,7 @@ python main.py --logdir <policy_path> --device cuda  # or cpu
 - **Contact force monitoring**: Foot contact detection for safety
 - **Emergency modes**: Controller-based safety shutdown and mode switching
 - **Hardware abstraction**: Safe motor control with configurable PID gains
+- **Vision failure safety**: **NEW** - System stops when depth capture fails to prevent unsafe operation
 
 ## Current Development Status
 
@@ -167,7 +197,7 @@ python main.py --logdir <policy_path> --device cuda  # or cpu
 - Policy interface abstraction implemented
 - Configuration management system refactored
 - ROS2 integration and robot communication
-- Visual processing pipeline
+- **Non-blocking depth image capture system implemented** - **NEW**
 - Sport mode management
 - Safety systems and motor control
 
@@ -183,8 +213,8 @@ python main.py --logdir <policy_path> --device cuda  # or cpu
 ### Core Files
 - **`main.py`**: Main runner and argument parsing
 - **`go2_ros2_handler.py`**: ROS2 communication and robot control
+- **`depth_publisher.py`**: **NEW** - Non-blocking depth image capture with clean architectural separation
 - **`policy_interface/legged_loco.py`**: legged-loco policy implementation *(base policy successfully deployed)*
-- **Vision processing components**: Depth image processing and visual-motor integration *(CURRENT REFACTORING FOCUS)*
 - **`utils/`**: Utility modules (config, hardware, sport mode management)
 
 ### Development Principles
@@ -194,6 +224,7 @@ python main.py --logdir <policy_path> --device cuda  # or cpu
 - **Policy interface isolation**: The handler should not be aware of specific policy interfaces - all policy-specific configuration must come through the interface's get_configs_for_handler() method
 - **Safety first**: Always maintain hardware safety limits and emergency controls
 - **Vision pipeline clarity**: Prioritize readable and maintainable vision processing code
+- **Fail-fast over fault-tolerance**: Prioritize safety by failing fast when assumptions are violated rather than attempting to continue with potentially incorrect state. Use assertions to validate critical assumptions and stop execution when the system doesn't behave as expected.
 
 ### Configuration Management
 - **Do not modify configuration files**: Configuration files in weight-and-cfg/ are copied from simulation training and should remain unchanged

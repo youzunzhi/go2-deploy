@@ -302,8 +302,6 @@ def run_depth_publisher_process(output_resolution: tuple):
         output_resolution: (width, height) for output depth image
         publish_rate_hz: Rate to publish depth tensors (Hz)
     """
-    rclpy.init()
-    
     try:
         # Create and start runner
         runner = DepthImagePublisherRunner(output_resolution)
