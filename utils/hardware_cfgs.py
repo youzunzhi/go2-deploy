@@ -21,7 +21,7 @@ ROS_TOPICS = {
     "LOW_STATE": "/lowstate",
     "LOW_CMD": "/lowcmd",
     "WIRELESS_CONTROLLER": "/wirelesscontroller",
-    "DEPTH_IMAGE": "/forward_depth_image",
+    "DEPTH_IMAGE": "/depth_image_tensor",
     "SPORT_MODE": "/api/sport/request",
     "MOTION_SWITCHER": "/api/motion_switcher/request",
 }

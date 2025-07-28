@@ -3,10 +3,12 @@ import rclpy
 import os.path as osp
 import time
 import torch
+from multiprocessing import Process
 
 from go2_ros2_handler import Go2ROS2Handler
 from policy_interface import get_policy_interface
 from utils.control_mode_manager import ControlModeManager
+from depth_publisher import run_depth_publisher_node
 
 
 class Go2Runner:
@@ -22,9 +24,15 @@ class Go2Runner:
         rclpy.init()
         
         self.policy_interface = get_policy_interface(logdir, device)
+        
+        # Initialize depth publisher process if needed
+        self.depth_publisher_process = None
 
         # Get configs for handler
         joint_map, default_joint_pos, kp, kd, action_scale, clip_obs, clip_actions, enable_depth_capture, depth_resolution = self.policy_interface.get_configs_for_handler()
+
+        if enable_depth_capture:
+            self._start_depth_publisher_node(depth_resolution)
 
         self.handler = Go2ROS2Handler(
             joint_map=joint_map,
@@ -50,6 +58,23 @@ class Go2Runner:
         
         # Print configuration information
         self.log_system_info()
+        
+    def _start_depth_publisher_node(self, depth_resolution):
+        """Start depth publisher node in a separate process"""
+        self.handler.log_info(f"Starting depth publisher node with resolution {depth_resolution}")
+        
+        # Create and start process for depth publisher node
+        self.depth_publisher_process = Process(
+            target=run_depth_publisher_node,
+            args=(depth_resolution,),
+            daemon=True
+        )
+        self.depth_publisher_process.start()
+        
+        # Give the depth publisher some time to initialize
+        time.sleep(2.0)
+        
+        self.handler.log_info("Depth publisher node started successfully")
 
     def _warmup_policy(self):
         """Warm up policy at startup to avoid slow first iterations"""
@@ -77,8 +102,19 @@ class Go2Runner:
             self._handle_timing_mode()
         finally:
             # Shutdown properly
-            self.handler.shutdown()
-            rclpy.shutdown()
+            self._cleanup()
+    
+    def _cleanup(self):
+        """Clean up resources and shutdown nodes"""
+        # Shutdown depth publisher process if it exists
+        if self.depth_publisher_process and self.depth_publisher_process.is_alive():
+            self.handler.log_info("Terminating depth publisher process")
+            self.depth_publisher_process.terminate()
+            self.depth_publisher_process.join(timeout=5.0)
+            
+        # Shutdown main handler and ROS
+        self.handler.shutdown()
+        rclpy.shutdown()
     
     def _start_main_loop_timer(self):
         """Start the main loop timer for ROS-based timing control"""
@@ -132,7 +168,7 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     
-    parser.add_argument("--logdir", type=str, default='weight-and-cfg/legged-loco', help="The directory which contains the config and model weights files")
+    parser.add_argument("--logdir", type=str, default='weight-and-cfg/EPO', help="The directory which contains the config and model weights files")
     parser.add_argument("--nodryrun", action="store_true", default=False, help="Disable dryrun mode")
     parser.add_argument("--timing_mode", type=str, default="ros_timer",
         choices=["manual_control", "ros_timer"],

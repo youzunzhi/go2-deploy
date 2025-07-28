@@ -8,6 +8,7 @@ from unitree_go.msg import (
     LowCmd,
 )
 from unitree_api.msg import Request
+from std_msgs.msg import Float32MultiArray
 
 
 if os.uname().machine in ["x86_64", "amd64"]:
@@ -87,16 +88,11 @@ class Go2ROS2Handler:
         self.depth_resolution = depth_resolution
 
         self.NUM_JOINTS = len(self.joint_map) # number of joints (12)
-
+        
         self.joint_pos_limit_high_sim, self.joint_pos_limit_low_sim, self.torque_limit_sim = get_joint_limits_in_sim_order(self.joint_map, self.device)
         
         self.init_buffers()
         self.init_ros_communication()
-
-        # Initialize depth handler if enabled
-        self.depth_handler = None
-        if self.enable_depth_capture:
-            self.init_depth_handler()
 
     def init_ros_communication(self):
         """ after initializing the env and policy, register ros related callbacks and topics
@@ -143,7 +139,15 @@ class Go2ROS2Handler:
             1,
         )
 
-        # No depth image subscriber needed - we get frames directly from depth_handler
+        # Depth image subscriber (if depth capture is enabled)
+        if self.enable_depth_capture:
+            self.depth_image_sub = self.node.create_subscription(
+                Float32MultiArray,
+                ROS_TOPICS["DEPTH_IMAGE"],
+                self._depth_image_callback,
+                1
+            )
+            self.log_info("Depth image subscriber started, waiting to receive depth image tensors.")
 
         self.log_info("ROS handlers started, waiting to recieve critical low state and wireless controller messages.")
         if not self.dryrun:
@@ -157,13 +161,6 @@ class Go2ROS2Handler:
                 break
         self.log_info("Low state and wireless message received, the robot is ready to go.")
         
-    def init_depth_handler(self):
-        """Initialize the depth handler for RealSense camera capture"""
-        assert self.depth_resolution is not None, "Depth resolution must be provided when depth capture is enabled"
-        from rs_depth_handler import RSDepthHandler
-        self.depth_handler = RSDepthHandler(output_resolution=self.depth_resolution)
-        self.log_info(f"Depth handler initialized successfully with resolution {self.depth_resolution}")
-
     def init_buffers(self):
         self.xyyaw_command = torch.zeros(1, 3, device=self.device, dtype=torch.float32)
         self.dof_pos_ = torch.zeros(1, self.NUM_JOINTS, device=self.device, dtype=torch.float32)
@@ -171,6 +168,8 @@ class Go2ROS2Handler:
         self.actions = torch.zeros(1, self.NUM_JOINTS, device=self.device, dtype=torch.float32)    
         self.contact_filt = torch.ones((1, 4), device=self.device, dtype=torch.float32)
         self.last_contact_filt = torch.ones((1, 4), device=self.device, dtype=torch.float32)
+        if self.enable_depth_capture:
+            self.depth_tensor = torch.zeros(1, self.depth_resolution[0], self.depth_resolution[1], device=self.device, dtype=torch.float32)
 
     def reset_obs(self):
         self.xyyaw_command = torch.zeros(1, 3, device=self.device, dtype=torch.float32)
@@ -240,7 +239,20 @@ class Go2ROS2Handler:
 
         # Update the buffer
         self.xyyaw_command = torch.tensor([[vx, vy, yaw]], device=self.device, dtype=torch.float32)
-
+        
+    def _depth_image_callback(self, msg):
+        """Callback for receiving depth image tensors from depth publisher node"""
+        try:
+            # Reconstruct tensor from Float32MultiArray message using known shape
+            # Shape is (1, height, width) where height, width come from depth_resolution
+            height, width = self.depth_resolution[1], self.depth_resolution[0]  # depth_resolution is (width, height)
+            expected_shape = (1, height, width)
+            
+            # Convert flat list back to tensor with known shape
+            self.depth_tensor = torch.tensor(msg.data, dtype=torch.float32).reshape(expected_shape).to(self.device)
+            
+        except Exception as e:
+            self.log_error(f"Error processing depth image message: {e}")
     # Observation retrieval methods for policy interface
     # These methods extract sensor data from ROS buffers and format them as PyTorch tensors
 
@@ -287,10 +299,14 @@ class Go2ROS2Handler:
         return self.contact_filt
 
     def get_depth_image(self):
-        """Get depth image from RealSense camera for vision-based policies"""
-        assert self.enable_depth_capture, "Depth capture is not enabled. Set enable_depth_capture=True when initializing the handler."
-        assert self.depth_handler is not None, "Depth handler is not initialized."
-        return self.depth_handler.get_depth_image(device=self.device)
+        """Get latest depth image tensor (non-blocking)
+        
+        Returns:
+            torch.Tensor or None: Latest depth image tensor, or None if no data received yet
+        """
+        assert self.enable_depth_capture, "Depth capture is not enabled."
+        
+        return self.depth_tensor.clone()  # Return a copy to avoid race conditions
 
     def clip_actions_by_joint_limits(self, robot_coordinates_action):
         """
