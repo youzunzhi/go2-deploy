@@ -25,6 +25,19 @@ This repository is actively under development and testing. Usage manuals and det
 
 This codebase is adapted from the excellent work at [Extreme-Parkour-Onboard](https://github.com/change-every/Extreme-Parkour-Onboard). Special thanks to the original authors for their contributions to legged robot deployment.
 
+## Controller Input
+
+### Safety Controls
+- **SELECT**: Emergency safe exit - immediately turns off all motors and exits the program
+
+### Operational Controls
+- **L1**: Switch from sport mode to stand policy
+- **Y**: Switch from stand policy to locomotion policy  
+- **L2**: Switch back to sport mode from any mode
+- **R1**: Stand up (in sport mode)
+- **R2**: Sit down (in sport mode)
+- **X**: Balance stand (in sport mode)
+
 ## Safety Notice
 
-This system controls a physical robot. Always ensure proper safety measures are in place during development and testing.
+This system controls a physical robot. Always ensure proper safety measures are in place during development and testing. Use the SELECT button for emergency shutdown.

@@ -130,6 +130,10 @@ python main.py --logdir <policy_path> --device cuda  # or cpu
 
 ### Controller Input
 
+#### Safety Controls
+- **SELECT**: Emergency safe exit - immediately turns off all motors and exits the program
+
+#### Operational Controls
 - **L1**: Switch from sport mode to stand policy
 - **Y**: Switch from stand policy to locomotion policy  
 - **L2**: Switch back to sport mode from any mode
