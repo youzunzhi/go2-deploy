@@ -1,6 +1,6 @@
 # Go2 Deployment System
 
-A unified deployment system for reinforcement learning policies on the Unitree Go2 quadruped robot. This codebase is adapted from [Extreme-Parkour-Onboard](https://github.com/change-every/Extreme-Parkour-Onboard).
+A unified deployment system for reinforcement learning policies on the Unitree Go2 quadruped robot. 
 
 ## Project Goal
 
@@ -10,11 +10,10 @@ Create a unified deployment system that can load and run RL policies from differ
 
 **✅ Successfully Completed:**
 - legged-loco base locomotion policy deployment and validation
+- Extreme-Parkour-Onboard (EPO) vision policy deployment and validation
 
 **🚧 Currently in Development:**
-- Vision pipeline refactoring for improved readability and clarity
-- Testing vision-based policies from Extreme-Parkour-Onboard
-- Deploy legged-loco vision policies
+- Deploy legged-loco vision policies using Go2's onboard LiDAR sensor
 - Extended multi-environment policy support
 
 ## Development Status
