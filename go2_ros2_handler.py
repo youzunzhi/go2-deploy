@@ -323,6 +323,9 @@ class Go2ROS2Handler:
         assert self.depth_tensor is not None, "Depth capture has failed - cannot continue vision-based policy"
         
         return self.depth_tensor.clone()  # Return a copy to avoid race conditions
+    
+    def get_translation(self):
+        raise NotImplementedError("Not implemented")
 
     def clip_actions_by_joint_limits(self, robot_coordinates_action):
         """
