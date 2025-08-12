@@ -9,6 +9,21 @@ def wrap_to_pi(angle):
     return (angle + math.pi) % (2 * math.pi) - math.pi
 
 
+@torch.jit.script  # type: ignore
+def quat_rotate_inverse(q: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+    """Rotate vector v from world frame into the frame of quaternion q (inverse rotation).
+    q is (B,4) in [x,y,z,w] order; v is (B,3). Returns (B,3).
+    This matches the Isaac Gym implementation and training behavior.
+    """
+    shape = q.shape
+    q_w = q[:, -1]
+    q_vec = q[:, :3]
+    a = v * (2.0 * q_w ** 2 - 1.0).unsqueeze(-1)
+    b = torch.cross(q_vec, v, dim=-1) * q_w.unsqueeze(-1) * 2.0
+    c = q_vec * torch.bmm(q_vec.view(shape[0], 1, 3), v.view(shape[0], 3, 1)).squeeze(-1) * 2.0
+    return a - b + c
+
+
 class ABSPolicyInterface(BasePolicyInterface):
     def __init__(self, logdir, device):
         super().__init__(logdir, device)
@@ -32,22 +47,11 @@ class ABSPolicyInterface(BasePolicyInterface):
         last_actions = self.handler.get_last_actions_obs()  # (1,12)
         contact = self.handler.get_contact_filt_obs() * 2.0  # -> [-1, 1] like training
 
-        # Projected gravity in base frame from roll/pitch/yaw
-        roll, pitch, yaw = base_rpy[0, 0].item(), base_rpy[0, 1].item(), base_rpy[0, 2].item()
-        cr, sr = math.cos(roll), math.sin(roll)
-        cp, sp = math.cos(pitch), math.sin(pitch)
-        cy, sy = math.cos(yaw), math.sin(yaw)
-        # Rotation matrix R = Rz(yaw) * Ry(pitch) * Rx(roll)
-        # We need g_base = R^T * [0,0,-1]
-        # Compute R^T rows explicitly
-        r00, r01, r02 = cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr
-        r10, r11, r12 = sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr
-        r20, r21, r22 = -sp, cp * sr, cp * cr
-        gx, gy, gz = 0.0, 0.0, -1.0
-        g_base = torch.tensor([[r00 * gx + r10 * gy + r20 * gz,
-                                 r01 * gx + r11 * gy + r21 * gz,
-                                 r02 * gx + r12 * gy + r22 * gz]],
-                               device=self.device, dtype=torch.float32)  # (1,3)
+        # Projected gravity in base frame via quaternion rotate-inverse (reads quaternion from IMU)
+        # Prefer reading base quaternion directly from handler for fidelity
+        base_quat = self.handler.get_base_quat_obs()  # (1,4) xyzw
+        gravity_vec = torch.tensor([[0.0, 0.0, -1.0]], device=self.device, dtype=torch.float32)
+        proj_gravity = quat_rotate_inverse(base_quat, gravity_vec)
 
         # Commands from goal and translation (position difference in base-yaw frame)
         translation = self.handler.get_translation()  # (1,3) current position w.r.t. start, meters
@@ -67,7 +71,7 @@ class ABSPolicyInterface(BasePolicyInterface):
         obs = torch.cat([
             contact,                # 4
             ang_vel,                # 3
-            g_base,                 # 3
+            proj_gravity,           # 3
             commands,               # 3
             timer_left,             # 1
             dof_pos,                # 12
