@@ -282,15 +282,17 @@ class Go2ROS2Handler:
 
     def get_base_rpy_obs(self):
         """Get base orientation as roll-pitch-yaw from IMU quaternion"""
-        quat_xyzw = torch.tensor([
-            self.low_state_buffer.imu_state.quaternion[1],
-            self.low_state_buffer.imu_state.quaternion[2],
-            self.low_state_buffer.imu_state.quaternion[3],
-            self.low_state_buffer.imu_state.quaternion[0],
-            ], device=self.device, dtype=torch.float32).unsqueeze(0)
+        quat_xyzw = self.get_base_quat_obs()
         roll, pitch, yaw = get_euler_xyz(quat_xyzw)
         base_rpy = torch.tensor([[roll, pitch, yaw]], device=self.device, dtype=torch.float32)
         return base_rpy
+
+    def get_base_quat_obs(self):
+        """Get base orientation quaternion in xyzw order (normalized)"""
+        q_wxyz = self.low_state_buffer.imu_state.quaternion
+        quat_xyzw = torch.tensor([[q_wxyz[1], q_wxyz[2], q_wxyz[3], q_wxyz[0]]],
+                                 device=self.device, dtype=torch.float32)
+        return quat_xyzw
 
     def get_dof_pos_obs(self):
         """Get joint positions relative to default pose"""
@@ -323,6 +325,9 @@ class Go2ROS2Handler:
         assert self.depth_tensor is not None, "Depth capture has failed - cannot continue vision-based policy"
         
         return self.depth_tensor.clone()  # Return a copy to avoid race conditions
+    
+    def get_translation(self):
+        raise NotImplementedError("Not implemented")
 
     def clip_actions_by_joint_limits(self, robot_coordinates_action):
         """
