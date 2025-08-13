@@ -78,11 +78,11 @@ class ABSPolicyInterface(BasePolicyInterface):
 
     def _get_obs(self):
         # Proprioception
+        contact = self.handler.get_contact_filt_obs() * 2.0  # -> [-1, 1] like training
         ang_vel = self.handler.get_ang_vel_obs() * self.obs_scales["ang_vel"]  # (1,3)
         dof_pos = self.handler.get_dof_pos_obs() * self.obs_scales["dof_pos"]  # (1,12)
         dof_vel = self.handler.get_dof_vel_obs() * self.obs_scales["dof_vel"]  # (1,12)
         last_actions = self.handler.get_last_actions_obs()  # (1,12)
-        contact = self.handler.get_contact_filt_obs() * 2.0  # -> [-1, 1] like training
 
         # Projected gravity in base frame via quaternion rotate-inverse (reads quaternion from IMU)
         # Prefer reading base quaternion directly from handler for fidelity
@@ -125,23 +125,24 @@ class ABSPolicyInterface(BasePolicyInterface):
         # Configuration adapted from Go2PosRoughCfg (training env), excluding ray2d
         # Joint names in simulation order
         joint_names = [
-            "FL_hip_joint", "FR_hip_joint", "RL_hip_joint", "RR_hip_joint",
-            "FL_thigh_joint", "FR_thigh_joint", "RL_thigh_joint", "RR_thigh_joint",
-            "FL_calf_joint", "FR_calf_joint", "RL_calf_joint", "RR_calf_joint",
+            "FL_hip_joint", "FL_thigh_joint", "FL_calf_joint",
+            "FR_hip_joint", "FR_thigh_joint", "FR_calf_joint",
+            "RL_hip_joint", "RL_thigh_joint", "RL_calf_joint",
+            "RR_hip_joint", "RR_thigh_joint", "RR_calf_joint",
         ]
         self.joint_map = get_joint_map_from_names(joint_names)
         default_joint_pos_dict = {
             'FL_hip_joint': 0.1,
-            'RL_hip_joint': 0.1,
-            'FR_hip_joint': -0.1,
-            'RR_hip_joint': -0.1,
             'FL_thigh_joint': 0.8,
-            'RL_thigh_joint': 1.0,
-            'FR_thigh_joint': 0.8,
-            'RR_thigh_joint': 1.0,
             'FL_calf_joint': -1.5,
-            'RL_calf_joint': -1.5,
+            'FR_hip_joint': -0.1,
+            'FR_thigh_joint': 0.8,
             'FR_calf_joint': -1.5,
+            'RL_hip_joint': 0.1,
+            'RL_thigh_joint': 1.0,
+            'RL_calf_joint': -1.5,
+            'RR_hip_joint': -0.1,
+            'RR_thigh_joint': 1.0,
             'RR_calf_joint': -1.5,
         }
         self.default_joint_pos = parse_default_joint_pos_dict(default_joint_pos_dict, joint_names)
