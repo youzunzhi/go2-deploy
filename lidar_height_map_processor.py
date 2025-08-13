@@ -22,11 +22,11 @@ class LiDARHeightMapProcessor:
     def __init__(self, device="cpu"):
         self.device = device
         
-        # Height map参数 (基于legged-loco配置)
-        self.voxel_size_xy = 0.06  # 6cm分辨率
-        self.range_x = [-0.8, 0.2]  # 1m前向范围
-        self.range_y = [-0.8, 0.8]  # 1.6m横向范围
-        self.range_z = [0.0, 5.0]   # 5m垂直范围
+        # Height map参数 (使用所有点云数据的完整范围)
+        self.voxel_size_xy = 0.15  # 15cm分辨率 (适应更大范围)
+        self.range_x = [-8.0, 3.0]  # 11m范围 (扩大以包含所有点)
+        self.range_y = [-6.0, 4.0]  # 10m范围 (扩大以包含所有点)
+        self.range_z = [-0.5, 3.0]  # Z范围包含所有高度
         
         # 计算grid尺寸
         self.x_bins = int((self.range_x[1] - self.range_x[0]) / self.voxel_size_xy)  # 17
@@ -162,19 +162,19 @@ class LiDARHeightMapProcessor:
             )
             filtered_points = points[mask]
             
-            # 创建height map grid
-            height_map = np.full((self.y_bins, self.x_bins), -10.0, dtype=np.float32)
+            # 创建height map grid，初始化为很小的值
+            height_map = np.full((self.y_bins, self.x_bins), -100.0, dtype=np.float32)
             
             if len(filtered_points) > 0:
                 # 计算voxel索引
                 x_idx = ((filtered_points[:, 0] - self.range_x[0]) / self.voxel_size_xy).astype(int)
                 y_idx = ((filtered_points[:, 1] - self.range_y[0]) / self.voxel_size_xy).astype(int)
                 
-                # 对每个voxel，选择最低z值 (论文要求)
+                # 对每个voxel，选择最高z值 (地面高度)
                 for i in range(len(filtered_points)):
                     xi, yi = x_idx[i], y_idx[i]
                     if 0 <= xi < self.x_bins and 0 <= yi < self.y_bins:
-                        height_map[yi, xi] = min(height_map[yi, xi], filtered_points[i, 2])
+                        height_map[yi, xi] = max(height_map[yi, xi], filtered_points[i, 2])
             
             # 应用maximum filter到最近5帧
             self.height_map_history.append(height_map)
