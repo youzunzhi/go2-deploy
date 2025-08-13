@@ -93,8 +93,9 @@ class ABSPolicyInterface(BasePolicyInterface):
         # Commands from goal and translation (position difference in base-yaw frame)
         # This matches the training code in _post_physics_step_callback()
         translation = self.handler.get_translation()  # (1,3) current position w.r.t. start, meters
-        pos_diff = self.goal_pose[:, :3] - translation  # (1,3) position difference in world frame
-        commands_xy = quat_rotate_inverse(yaw_quat(base_quat), pos_diff)[:, :2]  # Transform to base-yaw frame
+        pos_diff = self.goal_pose[:, :2] - translation[:, :2]  # (1,2) position difference in world frame (xy only)
+        pos_diff_3d = torch.cat([pos_diff, torch.zeros_like(pos_diff[:, :1])], dim=1)  # (1,3) add z=0 for rotation
+        commands_xy = quat_rotate_inverse(yaw_quat(base_quat), pos_diff_3d)[:, :2]  # Transform to base-yaw frame
         # Compute heading command
         forward_vec = torch.tensor([[1.0, 0.0, 0.0]], device=self.device, dtype=torch.float32)  # Forward direction
         forward = quat_apply(base_quat, forward_vec)  # Current heading direction in world frame
