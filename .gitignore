@@ -205,3 +205,4 @@ cython_debug/
 .cursorindexingignore
 
 .claude/local*
+*.png
