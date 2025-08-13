@@ -197,9 +197,11 @@ class Go2VelocityController(UnitreeRos2Real):
             # Convert ROS Image to OpenCV format is no longer needed
             
             # Encode as JPEG for transmission
+            encode_start = time.time()
             is_success, buffer = cv2.imencode('.jpg', cv_image, [
                 cv2.IMWRITE_JPEG_QUALITY, 85
             ])
+            encode_time = time.time() - encode_start
             
             if not is_success:
                 logger.error("❌ Failed to encode image")
@@ -212,20 +214,27 @@ class Go2VelocityController(UnitreeRos2Real):
             
             # Send request with timeout
             start_time = time.time()
+            logger.info(f"📤 Sending image to server (size: {len(buffer)} bytes)")
             response = requests.post(
                 f"{self.server_url}/get_velocity_command",  # Updated endpoint
                 files=files,
                 timeout=20  # VLM inference can be slow
             )
             
-            inference_time = time.time() - start_time
-            self.stats['last_inference_time'] = inference_time
+            total_time = time.time() - start_time
+            self.stats['last_inference_time'] = total_time
             
             if response.status_code == 200:
                 result = response.json()
                 if result.get('success', False):
                     self.stats['successful_inferences'] += 1
-                    # logger.info(f"✅ Velocity command received in {inference_time:.2f}s")
+                    
+                    # Extract server timing information
+                    server_inference_time = result.get('inference_time', 0.0)
+                    server_generation_time = result.get('generation_time', 0.0)
+                    network_time = total_time - server_inference_time
+                    
+                    logger.info(f"⏱️ Communication timing: Total={total_time:.3f}s (Encode={encode_time:.3f}s, Network={network_time:.3f}s, Server={server_inference_time:.3f}s, VLM={server_generation_time:.3f}s)")
                     return result
                 else:
                     logger.error(f"❌ Server error: {result.get('message', 'Unknown error')}")
