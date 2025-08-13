@@ -24,6 +24,44 @@ def quat_rotate_inverse(q: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
     return a - b + c
 
 
+@torch.jit.script  # type: ignore
+def normalize(x: torch.Tensor, eps: float = 1e-9) -> torch.Tensor:
+    """Normalize a tensor along the last dimension."""
+    return x / (torch.norm(x, dim=-1, keepdim=True) + eps)
+
+
+@torch.jit.script  # type: ignore
+def quat_apply(q: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+    """Apply quaternion rotation to vector.
+    q is (B,4) in [x,y,z,w] order; v is (B,3). Returns (B,3).
+    """
+    shape = q.shape
+    q_w = q[:, -1]
+    q_vec = q[:, :3]
+    a = v * (2.0 * q_w ** 2 - 1.0).unsqueeze(-1)
+    b = torch.cross(q_vec, v, dim=-1) * q_w.unsqueeze(-1) * 2.0
+    c = q_vec * torch.bmm(q_vec.view(shape[0], 1, 3), v.view(shape[0], 3, 1)).squeeze(-1) * 2.0
+    return a + b + c
+
+
+@torch.jit.script  # type: ignore
+def yaw_quat(quat: torch.Tensor) -> torch.Tensor:
+    """Extract yaw-only quaternion from full quaternion.
+    quat is (B,4) in [x,y,z,w] order. Returns (B,4).
+    """
+    quat_yaw = quat.clone().view(-1, 4)
+    qx = quat_yaw[:, 0]
+    qy = quat_yaw[:, 1]
+    qz = quat_yaw[:, 2]
+    qw = quat_yaw[:, 3]
+    yaw = torch.atan2(2 * (qw * qz + qx * qy), 1 - 2 * (qy * qy + qz * qz))
+    quat_yaw[:, :2] = 0.0
+    quat_yaw[:, 2] = torch.sin(yaw / 2)
+    quat_yaw[:, 3] = torch.cos(yaw / 2)
+    quat_yaw = normalize(quat_yaw)
+    return quat_yaw
+
+
 class ABSPolicyInterface(BasePolicyInterface):
     def __init__(self, logdir, device):
         super().__init__(logdir, device)
@@ -41,7 +79,6 @@ class ABSPolicyInterface(BasePolicyInterface):
     def _get_obs(self):
         # Proprioception
         ang_vel = self.handler.get_ang_vel_obs() * self.obs_scales["ang_vel"]  # (1,3)
-        base_rpy = self.handler.get_base_rpy_obs()  # (1,3): roll, pitch, yaw
         dof_pos = self.handler.get_dof_pos_obs() * self.obs_scales["dof_pos"]  # (1,12)
         dof_vel = self.handler.get_dof_vel_obs() * self.obs_scales["dof_vel"]  # (1,12)
         last_actions = self.handler.get_last_actions_obs()  # (1,12)
@@ -54,16 +91,16 @@ class ABSPolicyInterface(BasePolicyInterface):
         proj_gravity = quat_rotate_inverse(base_quat, gravity_vec)
 
         # Commands from goal and translation (position difference in base-yaw frame)
+        # This matches the training code in _post_physics_step_callback()
         translation = self.handler.get_translation()  # (1,3) current position w.r.t. start, meters
-        pos_diff_world = self.goal_pose[:, :3] - translation  # (1,3)
-        # rotate by -yaw (only yaw component as in training yaw_quat())
-        c, s = math.cos(yaw), math.sin(yaw)
-        cmd_x = c * pos_diff_world[0, 0] + s * pos_diff_world[0, 1]
-        cmd_y = -s * pos_diff_world[0, 0] + c * pos_diff_world[0, 1]
-        # heading residual: desired heading = goal_heading + atan2(dy, dx)
-        heading_target = wrap_to_pi(self.goal_pose[0, 2].item() + math.atan2(pos_diff_world[0, 1].item(), pos_diff_world[0, 0].item()))
-        cmd_yaw = wrap_to_pi(heading_target - yaw)
-        commands = torch.tensor([[cmd_x, cmd_y, cmd_yaw]], device=self.device, dtype=torch.float32)
+        pos_diff = self.goal_pose[:, :3] - translation  # (1,3) position difference in world frame
+        commands_xy = quat_rotate_inverse(yaw_quat(base_quat), pos_diff)[:, :2]  # Transform to base-yaw frame
+        # Compute heading command
+        forward_vec = torch.tensor([[1.0, 0.0, 0.0]], device=self.device, dtype=torch.float32)  # Forward direction
+        forward = quat_apply(base_quat, forward_vec)  # Current heading direction in world frame
+        current_heading = torch.atan2(forward[:, 1], forward[:, 0])  # Current heading angle
+        cmd_yaw = wrap_to_pi(self.heading_target - current_heading[0].item())
+        commands = torch.cat([commands_xy, torch.tensor([[cmd_yaw]], device=self.device, dtype=torch.float32)], dim=1)
 
         # Timer left normalized (no timer in deployment) -> set to constant 0.5
         timer_left = torch.tensor([[0.5]], device=self.device, dtype=torch.float32)
@@ -120,8 +157,10 @@ class ABSPolicyInterface(BasePolicyInterface):
             "dof_pos": 1.0,
             "dof_vel": 0.2,
         }
-        # Predefined goal pose [x, y, heading]
+        # Set default goal and compute heading target
         self.goal_pose = torch.tensor([[5.0, 0.0, 0.0]], device=self.device, dtype=torch.float32)
+        direction_to_goal = math.atan2(self.goal_pose[0, 1].item(), self.goal_pose[0, 0].item())
+        self.heading_target = wrap_to_pi(self.goal_pose[0, 2].item() + direction_to_goal)
 
     def _load_model(self):
         # Load TorchScript policy exported from training
