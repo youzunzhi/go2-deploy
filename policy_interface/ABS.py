@@ -78,7 +78,7 @@ class ABSPolicyInterface(BasePolicyInterface):
         config_path = osp.join(self.logdir, "config.json")
         with open(config_path, "r") as f:
             full_config = json.load(f, object_pairs_hook=OrderedDict)
-        env_config = full_config["env_cfg"]
+        env_config = full_config["env_config"]
         # Joint names in simulation order
         joint_names = [
             "FL_hip_joint", "FL_thigh_joint", "FL_calf_joint",
@@ -98,7 +98,7 @@ class ABSPolicyInterface(BasePolicyInterface):
         self.obs_scales = env_config["normalization"]["obs_scales"]
         
         # Goal pose in robot's initial frame: x=forward, y=left, z=up relative to start pose
-        self.goal_pose = torch.tensor([[5.0, 0.0, 0.0]], device=self.device, dtype=torch.float32)
+        self.goal_pose = torch.tensor([[2.5, 0.0, 0.0]], device=self.device, dtype=torch.float32)
 
     def _load_model(self):
         # Load TorchScript policy exported from training

@@ -8,6 +8,7 @@ All quaternions are expected to be in [x, y, z, w] format.
 
 import math
 import torch
+from typing import Tuple
 
 
 @torch.jit.script  # type: ignore
@@ -94,7 +95,7 @@ def yaw_quat(quat: torch.Tensor) -> torch.Tensor:
 
 
 @torch.jit.script  # type: ignore
-def get_euler_xyz(q: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+def get_euler_xyz(q: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Convert quaternion to Euler angles (roll, pitch, yaw).
 
     Args:

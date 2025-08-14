@@ -22,8 +22,8 @@ ROS_TOPICS = {
     "LOW_CMD": "/lowcmd",
     "WIRELESS_CONTROLLER": "/wirelesscontroller",
     "DEPTH_IMAGE": "/depth_image_tensor",
-    # "ODOMETRY": "/odometry/filtered",
-    "ODOMETRY": "/utlidar/robot_odom",
+    "ODOMETRY": "/odometry/filtered",
+    # "ODOMETRY": "/utlidar/robot_odom",
     "SPORT_MODE": "/api/sport/request",
     "MOTION_SWITCHER": "/api/motion_switcher/request",
 }
