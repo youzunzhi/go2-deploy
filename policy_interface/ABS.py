@@ -1,6 +1,10 @@
 import os
 import math
 import torch
+from collections import OrderedDict
+import json
+import os.path as osp
+
 from .base import BasePolicyInterface
 from utils import get_joint_map_from_names, parse_default_joint_pos_dict
 from utils.quaternion_utils import wrap_to_pi, quat_rotate_inverse, quat_apply, yaw_quat
@@ -68,6 +72,10 @@ class ABSPolicyInterface(BasePolicyInterface):
 
     def _load_configs(self):
         # Configuration adapted from Go2PosRoughCfg (training env), excluding ray2d
+        config_path = osp.join(self.logdir, "config.json")
+        with open(config_path, "r") as f:
+            full_config = json.load(f, object_pairs_hook=OrderedDict)
+        env_config = full_config["env_cfg"]
         # Joint names in simulation order
         joint_names = [
             "FL_hip_joint", "FL_thigh_joint", "FL_calf_joint",
@@ -76,43 +84,25 @@ class ABSPolicyInterface(BasePolicyInterface):
             "RR_hip_joint", "RR_thigh_joint", "RR_calf_joint",
         ]
         self.joint_map = get_joint_map_from_names(joint_names)
-        default_joint_pos_dict = {
-            'FL_hip_joint': 0.1,
-            'FL_thigh_joint': 0.8,
-            'FL_calf_joint': -1.5,
-            'FR_hip_joint': -0.1,
-            'FR_thigh_joint': 0.8,
-            'FR_calf_joint': -1.5,
-            'RL_hip_joint': 0.1,
-            'RL_thigh_joint': 1.0,
-            'RL_calf_joint': -1.5,
-            'RR_hip_joint': -0.1,
-            'RR_thigh_joint': 1.0,
-            'RR_calf_joint': -1.5,
-        }
+
+        default_joint_pos_dict = env_config["init_state"]["default_joint_angles"]
         self.default_joint_pos = parse_default_joint_pos_dict(default_joint_pos_dict, joint_names)
-        # PD gains and action scaling from Go2PosRoughCfg.control
-        self.kp = 25.0
-        self.kd = 0.6
-        self.action_scale = 0.25
-        # Normalization/Clipping from Go2PosRoughCfg.normalization
-        self.clip_obs = 100.0
-        self.clip_actions = None  # let handler/joint limits ensure safety
-        self.obs_scales = {
-            "ang_vel": 1.0,
-            "dof_pos": 1.0,
-            "dof_vel": 0.2,
-        }
-        # Set default goal and compute heading target
+        self.kp = float(env_config["control"]["stiffness"]["joint"])
+        self.kd = float(env_config["control"]["damping"]["joint"])
+        self.action_scale = float(env_config["control"]["action_scale"])
+        self.clip_obs = env_config["normalization"]["clip_observations"]
+        self.clip_actions = env_config["normalization"]["clip_actions"]
+        self.obs_scales = env_config["normalization"]["obs_scales"]
+        
         self.goal_pose = torch.tensor([[5.0, 0.0, 0.0]], device=self.device, dtype=torch.float32)
         direction_to_goal = math.atan2(self.goal_pose[0, 1].item(), self.goal_pose[0, 0].item())
         self.heading_target = wrap_to_pi(self.goal_pose[0, 2].item() + direction_to_goal)
 
     def _load_model(self):
         # Load TorchScript policy exported from training
-        model_path = os.path.join(self.logdir, "policy.jit")
+        model_path = os.path.join(self.logdir, "policy_jit.pt")
         if not os.path.isfile(model_path):
-            raise FileNotFoundError(f"ABS policy not found at {model_path}. Place TorchScript file as 'policy.jit'.")
+            raise FileNotFoundError(f"ABS policy not found at {model_path}. Place TorchScript file as 'policy_jit.pt'.")
         self.policy = torch.jit.load(model_path, map_location=self.device)
         self.policy.eval()
 
