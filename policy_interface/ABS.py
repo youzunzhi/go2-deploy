@@ -25,7 +25,7 @@ class ABSPolicyInterface(BasePolicyInterface):
         return action
 
     def _get_obs(self):
-        # Proprioception
+        # get directly from handler
         contact = self.handler.get_contact_filt_obs() * 2.0  # -> [-1, 1] like training
         ang_vel = self.handler.get_ang_vel_obs() * self.obs_scales["ang_vel"]  # (1,3)
         dof_pos = self.handler.get_dof_pos_obs() * self.obs_scales["dof_pos"]  # (1,12)
@@ -33,23 +33,26 @@ class ABSPolicyInterface(BasePolicyInterface):
         last_actions = self.handler.get_last_actions_obs()  # (1,12)
 
         # Projected gravity in base frame via quaternion rotate-inverse (reads quaternion from IMU)
-        # Prefer reading base quaternion directly from handler for fidelity
         base_quat = self.handler.get_base_quat_obs()  # (1,4) xyzw
-        gravity_vec = torch.tensor([[0.0, 0.0, -1.0]], device=self.device, dtype=torch.float32)
-        proj_gravity = quat_rotate_inverse(base_quat, gravity_vec)
+        gravity_vec_w = torch.tensor([[0.0, 0.0, -1.0]], device=self.device, dtype=torch.float32)  # Gravity vector in world frame
+        proj_gravity = quat_rotate_inverse(base_quat, gravity_vec_w)    # (1,3) projected gravity in base frame
 
-        # Commands from goal and translation (position difference in base-yaw frame)
-        # This matches the training code in _post_physics_step_callback()
-        translation = self.handler.get_translation()  # (1,3) current position w.r.t. start, meters
-        pos_diff = self.goal_pose[:, :2] - translation[:, :2]  # (1,2) position difference in world frame (xy only)
-        pos_diff_3d = torch.cat([pos_diff, torch.zeros_like(pos_diff[:, :1])], dim=1)  # (1,3) add z=0 for rotation
-        commands_xy = quat_rotate_inverse(yaw_quat(base_quat), pos_diff_3d)[:, :2]  # Transform to base-yaw frame
-        # Compute heading command
-        forward_vec = torch.tensor([[1.0, 0.0, 0.0]], device=self.device, dtype=torch.float32)  # Forward direction
-        forward = quat_apply(base_quat, forward_vec)  # Current heading direction in world frame
-        current_heading = torch.atan2(forward[:, 1], forward[:, 0])  # Current heading angle
-        cmd_yaw = wrap_to_pi(self.heading_target - current_heading[0].item())
-        commands = torch.cat([commands_xy, torch.tensor([[cmd_yaw]], device=self.device, dtype=torch.float32)], dim=1)
+        # commands_xy = goal xy in initial robot frame - current xy in initial robot frame
+        #             = goal xy in initial robot frame - translation
+        translation = self.handler.get_translation()  # (1,3) current position w.r.t. start in robot's initial frame
+        commands_xy = self.goal_pose[:, :2] - translation[:, :2]  # (1,2) position difference in robot's initial frame (xy only)
+        # commands_yaw = goal yaw in initial robot frame - current yaw in initial robot frame
+        # Compute heading command - target heading is relative to robot's initial orientation
+        forward_vec_b = torch.tensor([[1.0, 0.0, 0.0]], device=self.device, dtype=torch.float32)  # Forward vec in base frame
+        cur_heading_vec_w = quat_apply(base_quat, forward_vec_b)  # Current heading direction in world frame
+        cur_yaw_w = torch.atan2(cur_heading_vec_w[:, 1], cur_heading_vec_w[:, 0])  # Current heading angle in world frame
+        # Get initial heading direction in world frame
+        start_heading_vec_w = quat_apply(self.handler.start_quat, forward_vec_b)  # Initial heading in world frame
+        start_yaw_w = torch.atan2(start_heading_vec_w[:, 1], start_heading_vec_w[:, 0])  # Initial heading angle
+        # Calculate heading relative to initial orientation
+        cur_yaw_i = wrap_to_pi(cur_yaw_w[0].item() - start_yaw_w[0].item()) # current yaw in initial base frame
+        commands_yaw = wrap_to_pi(self.goal_pose[:, 2] - cur_yaw_i)
+        commands = torch.cat([commands_xy, torch.tensor([[commands_yaw]], device=self.device, dtype=torch.float32)], dim=1)
 
         # Timer left normalized (no timer in deployment) -> set to constant 0.5
         timer_left = torch.tensor([[0.5]], device=self.device, dtype=torch.float32)
@@ -94,9 +97,8 @@ class ABSPolicyInterface(BasePolicyInterface):
         self.clip_actions = env_config["normalization"]["clip_actions"]
         self.obs_scales = env_config["normalization"]["obs_scales"]
         
+        # Goal pose in robot's initial frame: x=forward, y=left, z=up relative to start pose
         self.goal_pose = torch.tensor([[5.0, 0.0, 0.0]], device=self.device, dtype=torch.float32)
-        direction_to_goal = math.atan2(self.goal_pose[0, 1].item(), self.goal_pose[0, 0].item())
-        self.heading_target = wrap_to_pi(self.goal_pose[0, 2].item() + direction_to_goal)
 
     def _load_model(self):
         # Load TorchScript policy exported from training
