@@ -295,5 +295,5 @@ class StandController:
         """Compute and send the current stand action to robot motors"""
         stand_action = self.get_stand_action()
         actions_tensor = torch.tensor(stand_action, device=self.device).unsqueeze(0)
-        self.handler._publish_legs_cmd(actions_tensor[0])
+        self.handler._publish_legs_cmd(actions_tensor[0], kp=40., kd=1.)
 

@@ -455,10 +455,15 @@ class Go2ROS2Handler:
         self._publish_legs_cmd(robot_coordinates_action[0])
 
     """ functions that actually publish the commands and take effect """
-    def _publish_legs_cmd(self, q_cmd_sim_order):
+    def _publish_legs_cmd(self, q_cmd_sim_order, kp=None, kd=None):
         """ Publish the joint commands to the robot legs in simulation order.
         q_cmd_sim_order: shape (NUM_DOF,), in simulation order.
         """
+
+        # for stand policy (kp/kd is not None)
+        kp = self.kp if kp is None else kp
+        kd = self.kd if kd is None else kd
+
         motor_cmd = self.low_cmd_buffer.motor_cmd
         assert hasattr(motor_cmd, '__getitem__'), "motor_cmd must be indexable"
 
@@ -470,7 +475,7 @@ class Go2ROS2Handler:
             motor_cmd[real_idx].dq = 0. # type: ignore
             motor_cmd[real_idx].tau = 0. # type: ignore
             motor_cmd[real_idx].kp = self.kp # type: ignore
-            motor_cmd[real_idx].kd = self.kd # type: ignore
+            motor_cmd[real_idx].kd = kd # type: ignore
             
         self.low_cmd_buffer.crc = get_crc(self.low_cmd_buffer)
         self.low_cmd_pub.publish(self.low_cmd_buffer)
