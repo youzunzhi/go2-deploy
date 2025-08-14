@@ -36,6 +36,21 @@ def copysign(a: float, b: torch.Tensor) -> torch.Tensor:
     return torch.abs(a) * torch.sign(b)  # type: ignore
 
 @torch.jit.script  # type: ignore
+def quat_rotate_inverse(q: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+    """Rotate vector v from world frame into the frame of quaternion q (inverse rotation).
+    q is (B,4) in [x,y,z,w] order; v is (B,3). Returns (B,3).
+    This matches the Isaac Gym implementation and training behavior.
+    """
+    shape = q.shape
+    q_w = q[:, -1]
+    q_vec = q[:, :3]
+    a = v * (2.0 * q_w ** 2 - 1.0).unsqueeze(-1)
+    b = torch.cross(q_vec, v, dim=-1) * q_w.unsqueeze(-1) * 2.0
+    c = q_vec * torch.bmm(q_vec.view(shape[0], 1, 3), v.view(shape[0], 3, 1)).squeeze(-1) * 2.0
+    return a - b + c
+
+
+@torch.jit.script  # type: ignore
 def get_euler_xyz(q):
     qx, qy, qz, qw = 0, 1, 2, 3
     # roll (x-axis rotation)
@@ -190,6 +205,8 @@ class Go2ROS2Handler:
             # Translation tracking buffers - positions are (x, y, z) in meters
             self.start_pos = torch.zeros(1, 3, device=self.device, dtype=torch.float32)
             self.cur_pos = torch.zeros(1, 3, device=self.device, dtype=torch.float32)
+            # Store initial robot orientation for robot-frame translation calculation
+            self.start_quat = torch.zeros(1, 4, device=self.device, dtype=torch.float32)  # xyzw format
             self.start_pos_captured = False
 
     def reset_obs(self):
@@ -298,11 +315,18 @@ class Go2ROS2Handler:
             # Update current pose
             self.cur_pos = current_pos
 
-            # Capture start position on first message
+            # Capture start position and orientation on first message
             if not self.start_pos_captured:
                 self.start_pos = current_pos.clone()
+
+                # Extract and store initial robot orientation from odometry
+                orientation = msg.pose.pose.orientation
+                self.start_quat = torch.tensor([[orientation.x, orientation.y, orientation.z, orientation.w]],
+                                             device=self.device, dtype=torch.float32)
+
                 self.start_pos_captured = True
                 self.log_info(f"Translation capture: recorded start position at [{position.x:.3f}, {position.y:.3f}, {position.z:.3f}]")
+                self.log_info(f"Translation capture: recorded start orientation quat [x:{orientation.x:.3f}, y:{orientation.y:.3f}, z:{orientation.z:.3f}, w:{orientation.w:.3f}]")
 
         except Exception as e:
             self.log_error(f"Error processing odometry message: {e}")
@@ -366,17 +390,36 @@ class Go2ROS2Handler:
         return self.depth_tensor.clone()  # Return a copy to avoid race conditions
     
     def get_translation(self):
-        """Get translation (position difference) from start position to current position
+        """Get translation (position difference) from start position to current position in robot frame
 
         Returns:
-            torch.Tensor: Translation vector (1, 3) in meters [x, y, z]
+            torch.Tensor: Translation vector (1, 3) in meters [x, y, z] in robot frame
+                         where x=forward, y=left, z=up relative to robot's initial orientation
         """
         assert self.enable_translation_capture, "Translation capture is not enabled."
         assert self.start_pos_captured, "Start position has not been captured yet - no odometry data received"
 
-        # Return current position relative to start position
-        translation = self.cur_pos - self.start_pos
-        return translation
+        # Get world-frame translation
+        world_translation = self.cur_pos - self.start_pos
+
+        # Transform world-frame translation to robot frame using initial robot orientation
+        # Use inverse rotation to transform from world frame to robot frame
+        robot_translation = quat_rotate_inverse(self.start_quat, world_translation)
+
+        return robot_translation
+
+    def get_translation_world_frame(self):
+        """Get translation (position difference) from start position to current position in world frame
+
+        Returns:
+            torch.Tensor: Translation vector (1, 3) in meters [x, y, z] in world frame
+        """
+        assert self.enable_translation_capture, "Translation capture is not enabled."
+        assert self.start_pos_captured, "Start position has not been captured yet - no odometry data received"
+
+        # Return current position relative to start position in world frame
+        world_translation = self.cur_pos - self.start_pos
+        return world_translation
 
     def clip_actions_by_joint_limits(self, robot_coordinates_action):
         """
