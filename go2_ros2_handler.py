@@ -69,7 +69,7 @@ class Go2ROS2Handler:
         dryrun=True, # if True, the robot will not send commands to the real robot
         enable_depth_capture=False, # if True, initialize RealSense pipeline for depth capture
         depth_resolution: Optional[tuple] = None, # (width, height) for depth image resolution
-        enable_translation_capture=False, # if True, subscribe to /odometry/filtered for translation tracking
+        enable_translation_capture=False, # if True, subscribe to the odometry topic for translation tracking
     ):
         self.device = device
         
@@ -159,11 +159,11 @@ class Go2ROS2Handler:
         if self.enable_translation_capture:
             self.odometry_sub = self.node.create_subscription(
                 Odometry,
-                "/odometry/filtered",
+                ROS_TOPICS["ODOMETRY"],
                 self._odometry_callback,
                 1
             )
-            self.log_info("Odometry subscriber started, waiting to receive odometry messages from /odometry/filtered.")
+            self.log_info(f"Odometry subscriber started, waiting to receive odometry messages from {ROS_TOPICS['ODOMETRY']}.")
 
         self.log_info("ROS handlers started, waiting to recieve critical low state and wireless controller messages.")
         if not self.dryrun:
@@ -288,7 +288,7 @@ class Go2ROS2Handler:
             self.depth_tensor = None
 
     def _odometry_callback(self, msg):
-        """Callback for receiving odometry data from /odometry/filtered"""
+        """Callback for receiving odometry data from odometry topic"""
         try:
             # Extract position from odometry message
             position = msg.pose.pose.position

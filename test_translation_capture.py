@@ -41,8 +41,8 @@ def test_translation_capture():
         )
         
         print("Handler created successfully!")
-        print("Waiting for odometry data from /odometry/filtered...")
-        print("Make sure the robot is publishing odometry data to /odometry/filtered")
+        print("Waiting for odometry data from the odometry topic...")
+        print("Make sure the robot is publishing odometry data to the odometry topic")
         print("Press Ctrl+C to stop the test")
         
         # Wait for initial odometry data
@@ -55,7 +55,7 @@ def test_translation_capture():
         
         if not handler.start_pos_captured:
             print("ERROR: No odometry data received within timeout period!")
-            print("Please check that /odometry/filtered topic is publishing data")
+            print("Please check that the odometry topic topic is publishing data")
             return False
         
         print(f"Start position captured: {handler.start_pos.cpu().numpy()}")
@@ -104,7 +104,7 @@ def test_translation_capture():
 if __name__ == "__main__":
     print("=== Translation Capture Test ===")
     print("This test verifies that the Go2ROS2Handler can capture translation data")
-    print("from the /odometry/filtered topic.")
+    print("from the the odometry topic topic.")
     print()
     
     success = test_translation_capture()
