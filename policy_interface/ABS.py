@@ -172,3 +172,7 @@ class ABSPolicyInterface(BasePolicyInterface):
         self.policy = torch.jit.load(model_path, map_location=self.device)
         self.policy.eval()
 
+    def get_translation_config(self) -> bool:
+        """ABS policy requires translation capture for goal-based navigation"""
+        return True
+

@@ -9,6 +9,7 @@ from unitree_go.msg import (
 )
 from unitree_api.msg import Request
 from std_msgs.msg import Float32MultiArray
+from nav_msgs.msg import Odometry
 
 
 if os.uname().machine in ["x86_64", "amd64"]:
@@ -68,6 +69,7 @@ class Go2ROS2Handler:
         dryrun=True, # if True, the robot will not send commands to the real robot
         enable_depth_capture=False, # if True, initialize RealSense pipeline for depth capture
         depth_resolution: Optional[tuple] = None, # (width, height) for depth image resolution
+        enable_translation_capture=False, # if True, subscribe to /odometry/filtered for translation tracking
     ):
         self.device = device
         
@@ -86,6 +88,7 @@ class Go2ROS2Handler:
         self.dryrun = dryrun
         self.enable_depth_capture = enable_depth_capture
         self.depth_resolution = depth_resolution
+        self.enable_translation_capture = enable_translation_capture
 
         # Safe exit flag
         self.safe_exit_requested = False
@@ -152,6 +155,16 @@ class Go2ROS2Handler:
             )
             self.log_info("Depth image subscriber started, waiting to receive depth image tensors.")
 
+        # Odometry subscriber (if translation capture is enabled)
+        if self.enable_translation_capture:
+            self.odometry_sub = self.node.create_subscription(
+                Odometry,
+                "/odometry/filtered",
+                self._odometry_callback,
+                1
+            )
+            self.log_info("Odometry subscriber started, waiting to receive odometry messages from /odometry/filtered.")
+
         self.log_info("ROS handlers started, waiting to recieve critical low state and wireless controller messages.")
         if not self.dryrun:
             self.log_warn(f"You are running the code in no-dryrun mode and publishing to '{low_cmd_topic}', Please keep safe.")
@@ -168,11 +181,16 @@ class Go2ROS2Handler:
         self.xyyaw_command = torch.zeros(1, 3, device=self.device, dtype=torch.float32)
         self.dof_pos_ = torch.zeros(1, self.NUM_JOINTS, device=self.device, dtype=torch.float32)
         self.dof_vel_ = torch.zeros(1, self.NUM_JOINTS, device=self.device, dtype=torch.float32)
-        self.actions = torch.zeros(1, self.NUM_JOINTS, device=self.device, dtype=torch.float32)    
+        self.actions = torch.zeros(1, self.NUM_JOINTS, device=self.device, dtype=torch.float32)
         self.contact_filt = torch.ones((1, 4), device=self.device, dtype=torch.float32)
         self.last_contact_filt = torch.ones((1, 4), device=self.device, dtype=torch.float32)
         if self.enable_depth_capture:
             self.depth_tensor = torch.zeros(1, self.depth_resolution[0], self.depth_resolution[1], device=self.device, dtype=torch.float32)
+        if self.enable_translation_capture:
+            # Translation tracking buffers - positions are (x, y, z) in meters
+            self.start_pos = torch.zeros(1, 3, device=self.device, dtype=torch.float32)
+            self.cur_pos = torch.zeros(1, 3, device=self.device, dtype=torch.float32)
+            self.start_pos_captured = False
 
     def reset_obs(self):
         self.xyyaw_command = torch.zeros(1, 3, device=self.device, dtype=torch.float32)
@@ -268,6 +286,27 @@ class Go2ROS2Handler:
         except Exception as e:
             self.log_error(f"Error processing depth image message: {e}")
             self.depth_tensor = None
+
+    def _odometry_callback(self, msg):
+        """Callback for receiving odometry data from /odometry/filtered"""
+        try:
+            # Extract position from odometry message
+            position = msg.pose.pose.position
+            current_pos = torch.tensor([[position.x, position.y, position.z]],
+                                     device=self.device, dtype=torch.float32)
+
+            # Update current pose
+            self.cur_pos = current_pos
+
+            # Capture start position on first message
+            if not self.start_pos_captured:
+                self.start_pos = current_pos.clone()
+                self.start_pos_captured = True
+                self.log_info(f"Translation capture: recorded start position at [{position.x:.3f}, {position.y:.3f}, {position.z:.3f}]")
+
+        except Exception as e:
+            self.log_error(f"Error processing odometry message: {e}")
+
     # Observation retrieval methods for policy interface
     # These methods extract sensor data from ROS buffers and format them as PyTorch tensors
 
@@ -327,7 +366,17 @@ class Go2ROS2Handler:
         return self.depth_tensor.clone()  # Return a copy to avoid race conditions
     
     def get_translation(self):
-        raise NotImplementedError("Not implemented")
+        """Get translation (position difference) from start position to current position
+
+        Returns:
+            torch.Tensor: Translation vector (1, 3) in meters [x, y, z]
+        """
+        assert self.enable_translation_capture, "Translation capture is not enabled."
+        assert self.start_pos_captured, "Start position has not been captured yet - no odometry data received"
+
+        # Return current position relative to start position
+        translation = self.cur_pos - self.start_pos
+        return translation
 
     def clip_actions_by_joint_limits(self, robot_coordinates_action):
         """

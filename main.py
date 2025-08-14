@@ -29,7 +29,7 @@ class Go2Runner:
         self.depth_publisher_process = None
 
         # Get configs for handler
-        joint_map, default_joint_pos, kp, kd, action_scale, clip_obs, clip_actions, enable_depth_capture, depth_resolution = self.policy_interface.get_configs_for_handler()
+        joint_map, default_joint_pos, kp, kd, action_scale, clip_obs, clip_actions, enable_depth_capture, depth_resolution, enable_translation_capture = self.policy_interface.get_configs_for_handler()
 
         self.handler = Go2ROS2Handler(
             joint_map=joint_map,
@@ -43,6 +43,7 @@ class Go2Runner:
             clip_actions=clip_actions,
             enable_depth_capture=enable_depth_capture,
             depth_resolution=depth_resolution,
+            enable_translation_capture=enable_translation_capture,
         )
 
         if enable_depth_capture:

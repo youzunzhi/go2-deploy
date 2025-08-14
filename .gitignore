@@ -206,3 +206,4 @@ cython_debug/
 
 .claude/local*
 *.png
+captured_images/output_img.jpg

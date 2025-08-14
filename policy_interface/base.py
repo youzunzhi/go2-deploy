@@ -18,7 +18,7 @@ class BasePolicyInterface:
         self.clip_obs = None
         self.clip_actions = None
 
-    def get_configs_for_handler(self) -> Tuple[list, list, float, float, float, float, Optional[float], bool, Optional[Tuple[int, int]]]:
+    def get_configs_for_handler(self) -> Tuple[list, list, float, float, float, float, Optional[float], bool, Optional[Tuple[int, int]], bool]:
         assert self.joint_map is not None, "Joint map is not set"
         assert self.default_joint_pos is not None, "Default joint pos is not set"
         assert self.kp is not None, "Kp is not set"
@@ -28,8 +28,11 @@ class BasePolicyInterface:
 
         # Get depth configuration
         enable_depth_capture, depth_resolution = self.get_depth_config()
-        
-        return self.joint_map, self.default_joint_pos, self.kp, self.kd, self.action_scale, self.clip_obs, self.clip_actions, enable_depth_capture, depth_resolution
+
+        # Get translation capture configuration
+        enable_translation_capture = self.get_translation_config()
+
+        return self.joint_map, self.default_joint_pos, self.kp, self.kd, self.action_scale, self.clip_obs, self.clip_actions, enable_depth_capture, depth_resolution, enable_translation_capture
         
     def set_handler(self, handler):
         self.handler = handler
@@ -43,11 +46,19 @@ class BasePolicyInterface:
     
     def get_depth_config(self) -> Tuple[bool, Optional[Tuple[int, int]]]:
         """Get depth capture configuration
-        
+
         Returns:
-            (enable_depth_capture, depth_resolution): 
+            (enable_depth_capture, depth_resolution):
             - enable_depth_capture: Whether depth capture is needed
             - depth_resolution: (width, height) tuple if depth is needed, None otherwise
         """
         return False, None
+
+    def get_translation_config(self) -> bool:
+        """Get translation capture configuration
+
+        Returns:
+            enable_translation_capture: Whether translation capture is needed
+        """
+        return False
     
