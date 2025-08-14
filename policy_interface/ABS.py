@@ -3,63 +3,7 @@ import math
 import torch
 from .base import BasePolicyInterface
 from utils import get_joint_map_from_names, parse_default_joint_pos_dict
-
-
-def wrap_to_pi(angle):
-    return (angle + math.pi) % (2 * math.pi) - math.pi
-
-
-@torch.jit.script  # type: ignore
-def quat_rotate_inverse(q: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
-    """Rotate vector v from world frame into the frame of quaternion q (inverse rotation).
-    q is (B,4) in [x,y,z,w] order; v is (B,3). Returns (B,3).
-    This matches the Isaac Gym implementation and training behavior.
-    """
-    shape = q.shape
-    q_w = q[:, -1]
-    q_vec = q[:, :3]
-    a = v * (2.0 * q_w ** 2 - 1.0).unsqueeze(-1)
-    b = torch.cross(q_vec, v, dim=-1) * q_w.unsqueeze(-1) * 2.0
-    c = q_vec * torch.bmm(q_vec.view(shape[0], 1, 3), v.view(shape[0], 3, 1)).squeeze(-1) * 2.0
-    return a - b + c
-
-
-@torch.jit.script  # type: ignore
-def normalize(x: torch.Tensor, eps: float = 1e-9) -> torch.Tensor:
-    """Normalize a tensor along the last dimension."""
-    return x / (torch.norm(x, dim=-1, keepdim=True) + eps)
-
-
-@torch.jit.script  # type: ignore
-def quat_apply(q: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
-    """Apply quaternion rotation to vector.
-    q is (B,4) in [x,y,z,w] order; v is (B,3). Returns (B,3).
-    """
-    shape = q.shape
-    q_w = q[:, -1]
-    q_vec = q[:, :3]
-    a = v * (2.0 * q_w ** 2 - 1.0).unsqueeze(-1)
-    b = torch.cross(q_vec, v, dim=-1) * q_w.unsqueeze(-1) * 2.0
-    c = q_vec * torch.bmm(q_vec.view(shape[0], 1, 3), v.view(shape[0], 3, 1)).squeeze(-1) * 2.0
-    return a + b + c
-
-
-@torch.jit.script  # type: ignore
-def yaw_quat(quat: torch.Tensor) -> torch.Tensor:
-    """Extract yaw-only quaternion from full quaternion.
-    quat is (B,4) in [x,y,z,w] order. Returns (B,4).
-    """
-    quat_yaw = quat.clone().view(-1, 4)
-    qx = quat_yaw[:, 0]
-    qy = quat_yaw[:, 1]
-    qz = quat_yaw[:, 2]
-    qw = quat_yaw[:, 3]
-    yaw = torch.atan2(2 * (qw * qz + qx * qy), 1 - 2 * (qy * qy + qz * qz))
-    quat_yaw[:, :2] = 0.0
-    quat_yaw[:, 2] = torch.sin(yaw / 2)
-    quat_yaw[:, 3] = torch.cos(yaw / 2)
-    quat_yaw = normalize(quat_yaw)
-    return quat_yaw
+from utils.quaternion_utils import wrap_to_pi, quat_rotate_inverse, quat_apply, yaw_quat
 
 
 class ABSPolicyInterface(BasePolicyInterface):

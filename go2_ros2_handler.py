@@ -28,49 +28,10 @@ import numpy as np
 import torch
 
 from utils.hardware_cfgs import ROS_TOPICS, get_joint_limits_in_sim_order, WirelessButtons
+from utils.quaternion_utils import quat_rotate_inverse, get_euler_xyz
 
 
-@torch.jit.script  # type: ignore
-def copysign(a: float, b: torch.Tensor) -> torch.Tensor:
-    a = torch.tensor(a, device=b.device, dtype=torch.float).repeat(b.shape[0])  # type: ignore
-    return torch.abs(a) * torch.sign(b)  # type: ignore
 
-@torch.jit.script  # type: ignore
-def quat_rotate_inverse(q: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
-    """Rotate vector v from world frame into the frame of quaternion q (inverse rotation).
-    q is (B,4) in [x,y,z,w] order; v is (B,3). Returns (B,3).
-    This matches the Isaac Gym implementation and training behavior.
-    """
-    shape = q.shape
-    q_w = q[:, -1]
-    q_vec = q[:, :3]
-    a = v * (2.0 * q_w ** 2 - 1.0).unsqueeze(-1)
-    b = torch.cross(q_vec, v, dim=-1) * q_w.unsqueeze(-1) * 2.0
-    c = q_vec * torch.bmm(q_vec.view(shape[0], 1, 3), v.view(shape[0], 3, 1)).squeeze(-1) * 2.0
-    return a - b + c
-
-
-@torch.jit.script  # type: ignore
-def get_euler_xyz(q):
-    qx, qy, qz, qw = 0, 1, 2, 3
-    # roll (x-axis rotation)
-    sinr_cosp = 2.0 * (q[:, qw] * q[:, qx] + q[:, qy] * q[:, qz])
-    cosr_cosp = 1.0 - 2.0 * (q[:, qx] * q[:, qx] + q[:, qy] * q[:, qy])
-    roll = torch.atan2(sinr_cosp, cosr_cosp)
-
-    # pitch (y-axis rotation)
-    sinp = 2.0 * (q[:, qw] * q[:, qy] - q[:, qz] * q[:, qx])
-    pitch = torch.where(torch.abs(sinp) >= 1, copysign(
-        np.pi / 2.0, sinp), torch.asin(sinp))
-
-    # yaw (z-axis rotation)
-    siny_cosp = 2.0 * (q[:, qw] * q[:, qz] + q[:, qx] * q[:, qy])
-    cosy_cosp = 1.0 - 2.0 * (q[:, qy] * q[:, qy] + q[:, qz] * q[:, qz])
-    yaw = torch.atan2(siny_cosp, cosy_cosp)
-
-    return roll, pitch, yaw
-
-    
 class Go2ROS2Handler:
     def __init__(self,
         joint_map: list,
