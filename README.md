@@ -37,20 +37,15 @@ A unified deployment framework for reinforcement learning policies on the Unitre
 ### Running Existing Policies
 
 ```bash
-# Extreme-Parkour-Onboard policy (vision-based parkour)
+# Debug mode (no robot movement) - DEFAULT BEHAVIOR
 python main.py --logdir weight-and-cfg/EPO
-
-# legged-loco base policy (proprioceptive locomotion)
 python main.py --logdir weight-and-cfg/legged-loco-base
-
-# ABS position-only policy
 python main.py --logdir weight-and-cfg/ABS
 
-# Debug mode (no robot movement)
-python main.py --logdir <policy_path> --dryrun
-
-# Specify compute device
-python main.py --logdir <policy_path> --device cuda  # or cpu
+# Enable robot movement with --nodryrun
+python main.py --logdir weight-and-cfg/EPO --nodryrun
+python main.py --logdir weight-and-cfg/legged-loco-base --nodryrun
+python main.py --logdir weight-and-cfg/ABS --nodryrun
 ```
 
 ### Controller Input
