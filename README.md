@@ -151,10 +151,10 @@ def get_policy_interface(logdir, device):
 
 - **ROS2**: Robot communication and control
 - **PyTorch**: Deep learning inference
-- **OpenCV**: Computer vision processing
+- **NumPy**: Numerical computations
 - **Intel RealSense SDK**: Depth camera integration
 - **Unitree SDK**: Robot hardware interface
-- **rsl_rl**: Reinforcement learning utilities
+- **PyYAML**: Configuration file parsing
 
 ## Known Limitations
 

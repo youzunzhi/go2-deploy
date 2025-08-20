@@ -205,11 +205,10 @@ def get_policy_interface(logdir, device):
 **Core Stack:**
 - ROS2 (Robot Operating System 2)
 - PyTorch (deep learning inference)
-- OpenCV (computer vision)
 - NumPy (numerical computations)
 - Intel RealSense SDK (depth camera)
 - Unitree SDK (robot hardware)
-- rsl_rl (reinforcement learning library)
+- PyYAML (configuration file parsing)
 
 **Architecture Support:**
 - x86_64 and aarch64 architectures
