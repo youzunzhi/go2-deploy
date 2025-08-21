@@ -1,0 +1,60 @@
+seed: 42
+device: cuda:0
+num_steps_per_env: 24
+max_iterations: 6000
+empirical_normalization: false
+policy:
+  class_name: ActorCritic
+  init_noise_std: 1.0
+  actor_hidden_dims:
+  - 512
+  - 256
+  - 128
+  critic_hidden_dims:
+  - 512
+  - 256
+  - 128
+  activation: elu
+algorithm:
+  class_name: PPOExt
+  value_loss_coef: 1.0
+  use_clipped_value_loss: true
+  clip_param: 0.2
+  entropy_coef: 0.01
+  num_learning_epochs: 5
+  num_mini_batches: 4
+  learning_rate: 0.001
+  schedule: adaptive
+  gamma: 0.99
+  lam: 0.95
+  desired_kl: 0.01
+  max_grad_norm: 1.0
+save_interval: 250
+experiment_name: a1_turning
+run_name: ''
+logger: tensorboard
+neptune_project: isaaclab
+wandb_project: isaaclab
+resume: false
+load_run: .*
+load_checkpoint: model_.*.pt
+lin_vel_estimator:
+  train_lin_vel_estimator: true
+  train_with_est_lin_vel: true
+  lr: 5.0e-05
+  mlp_hidden_dims:
+  - 128
+  - 64
+  starting_dim_in_obs_for_input: 4
+  n_dim_input: 42
+  starting_dim_in_obs_for_output: 46
+  n_dim_output: 3
+vgp:
+  use_vgp: false
+  lr: 0.001
+  policy_load_run: .*
+  policy_load_checkpoint: model_.*.pt
+  use_pred_threshold_pos_y: 0.8
+  use_pred_threshold_heading: 0.5235987755982988
+  visual_num_envs: 16
+  save_depth_camera_images: false
