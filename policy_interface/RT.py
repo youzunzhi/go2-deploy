@@ -125,33 +125,23 @@ class RapidTurnPolicyInterface(BasePolicyInterface):
     def _get_rt_commands(self):
         """Get RT-style commands (goal segment endpoints)"""
         # RT uses goal segment commands with 4 dimensions: x_l, y_l, x_r, y_r
-        # For deployment, we'll use simplified forward movement commands
-        # This can be extended to use actual goal planning if needed
+        # Fixed goal segment in initial robot frame: 1m forward, 0.8m wide
+        # [left_x, left_y, right_x, right_y] = [1.0, 0.4, 1.0, -0.4]
         
-        xy_command = self.handler.get_xyyaw_command()
+        # Fixed goal in initial robot frame (stationary goal)
+        goal_initial = torch.tensor([[1.0, 0.4, 1.0, -0.4]], 
+                                   device=self.device, dtype=torch.float)
         
-        # Convert x,y,yaw commands to goal segment endpoints
-        # Simple approximation: create a segment perpendicular to movement direction
-        x_cmd, y_cmd, yaw_cmd = xy_command[0, 0], xy_command[0, 1], xy_command[0, 2]
+        # Get current robot position relative to initial position
+        translation = self.handler.get_translation()  # (1, 3) [x, y, z] in initial robot frame
         
-        # Create goal segment 1 meter ahead with 0.8m width (from config)
-        goal_distance = 1.0
-        seg_width = 0.8
+        # Transform goal from initial frame to current robot frame
+        # Subtract robot's movement from the goal coordinates
+        goal_current = goal_initial.clone()
+        goal_current[:, [0, 2]] -= translation[:, 0:1]  # Subtract x translation from both endpoints
+        goal_current[:, [1, 3]] -= translation[:, 1:2]  # Subtract y translation from both endpoints
         
-        # Goal center
-        goal_x = x_cmd * goal_distance
-        goal_y = y_cmd * goal_distance
-        
-        # Left and right endpoints (perpendicular to movement direction)
-        left_x = goal_x - seg_width/2 * (-y_cmd if abs(y_cmd) > 0.1 else np.sin(yaw_cmd + np.pi/2))
-        left_y = goal_y - seg_width/2 * (x_cmd if abs(x_cmd) > 0.1 else np.cos(yaw_cmd + np.pi/2))
-        right_x = goal_x + seg_width/2 * (-y_cmd if abs(y_cmd) > 0.1 else np.sin(yaw_cmd + np.pi/2))  
-        right_y = goal_y + seg_width/2 * (x_cmd if abs(x_cmd) > 0.1 else np.cos(yaw_cmd + np.pi/2))
-        
-        commands = torch.tensor([[left_x, left_y, right_x, right_y]], 
-                               device=self.device, dtype=torch.float)
-        
-        return commands
+        return goal_current
 
     def _get_projected_gravity(self):
         """Get gravity vector projected into robot's base frame"""
@@ -165,3 +155,7 @@ class RapidTurnPolicyInterface(BasePolicyInterface):
         proj_gravity = quat_rotate_inverse(base_quat, gravity_world)
         
         return proj_gravity
+
+    def get_translation_config(self) -> bool:
+        """RT policy needs translation tracking to compute commands relative to initial frame"""
+        return True
