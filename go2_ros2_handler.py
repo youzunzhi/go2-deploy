@@ -474,7 +474,7 @@ class Go2ROS2Handler:
             motor_cmd[real_idx].q = q_cmd_sim_order[sim_idx].item() # type: ignore
             motor_cmd[real_idx].dq = 0. # type: ignore
             motor_cmd[real_idx].tau = 0. # type: ignore
-            motor_cmd[real_idx].kp = self.kp # type: ignore
+            motor_cmd[real_idx].kp = kp # type: ignore
             motor_cmd[real_idx].kd = kd # type: ignore
             
         self.low_cmd_buffer.crc = get_crc(self.low_cmd_buffer)
