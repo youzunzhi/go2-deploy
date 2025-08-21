@@ -21,6 +21,9 @@ class RapidTurnPolicyInterface(BasePolicyInterface):
         # - Privileged linear velocity: 3 dims
         self.obs_dim = 49
         self.action_dim = 12
+        
+        # Required for policy warmup
+        self.warm_up_iter = 10
 
     def _load_configs(self):
         """Load configuration files"""
