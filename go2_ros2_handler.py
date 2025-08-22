@@ -267,30 +267,26 @@ class Go2ROS2Handler:
 
     def _odometry_callback(self, msg):
         """Callback for receiving odometry data from odometry topic"""
-        try:
-            # Extract position from odometry message
-            position = msg.pose.pose.position
-            current_pos = torch.tensor([[position.x, position.y, position.z]],
-                                     device=self.device, dtype=torch.float32)
+        # Extract position from odometry message
+        position = msg.pose.pose.position
+        current_pos = torch.tensor([[position.x, position.y, position.z]],
+                                    device=self.device, dtype=torch.float32)
 
-            # Update current pose
-            self.cur_pos = current_pos
+        # Update current pose
+        self.cur_pos = current_pos
 
-            # Capture start position and orientation on first message
-            if not self.start_pos_captured:
-                self.start_pos = current_pos.clone()
+        # Capture start position and orientation on first message
+        if not self.start_pos_captured:
+            self.start_pos = current_pos.clone()
 
-                # Extract and store initial robot orientation from odometry
-                orientation = msg.pose.pose.orientation
-                self.start_quat = torch.tensor([[orientation.x, orientation.y, orientation.z, orientation.w]],
-                                             device=self.device, dtype=torch.float32)
+            # Extract and store initial robot orientation from odometry
+            orientation = msg.pose.pose.orientation
+            self.start_quat = torch.tensor([[orientation.x, orientation.y, orientation.z, orientation.w]],
+                                            device=self.device, dtype=torch.float32)
 
-                self.start_pos_captured = True
-                self.log_info(f"Translation capture: recorded start position at [{position.x:.3f}, {position.y:.3f}, {position.z:.3f}]")
-                self.log_info(f"Translation capture: recorded start orientation quat [x:{orientation.x:.3f}, y:{orientation.y:.3f}, z:{orientation.z:.3f}, w:{orientation.w:.3f}]")
-
-        except Exception as e:
-            self.log_error(f"Error processing odometry message: {e}")
+            self.start_pos_captured = True
+            self.log_info(f"Translation capture: recorded start position at [{position.x:.3f}, {position.y:.3f}, {position.z:.3f}]")
+            self.log_info(f"Translation capture: recorded start orientation quat [x:{orientation.x:.3f}, y:{orientation.y:.3f}, z:{orientation.z:.3f}, w:{orientation.w:.3f}]")
 
     # Observation retrieval methods for policy interface
     # These methods extract sensor data from ROS buffers and format them as PyTorch tensors
@@ -388,7 +384,18 @@ class Go2ROS2Handler:
         This is useful when switching between policies that require different reference frames
         or when odometry has drifted and needs to be reset.
         """
-        if self.enable_translation_capture:
+        assert self.enable_translation_capture, "Translation capture is not enabled."
+
+        # Instead of invalidating, just reset to current position if we have one
+        if hasattr(self, 'cur_pos') and self.cur_pos is not None and hasattr(self, 'start_quat'):
+            # Use current position as new start position
+            self.start_pos = self.cur_pos.clone()
+            # Get current orientation from base quaternion buffer
+            base_quat = self.get_base_quat_obs()
+            self.start_quat = base_quat.clone()
+            self.log_info("Translation tracking reset - using current position as new start position")
+        else:
+            # Fall back to invalidating if no current position available
             self.start_pos_captured = False
             self.log_info("Translation tracking reset - will recapture start position on next odometry message")
 
