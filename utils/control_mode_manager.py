@@ -1,7 +1,7 @@
 import torch
 from unitree_api.msg import Request
 from utils.hardware_cfgs import STAND_STAGE1_DURATION, STAND_STAGE2_DURATION, STAND_TARGET_POS_STAGE1, STAND_TARGET_POS_STAGE2, WirelessButtons
-from policy_interface.base_policy_interface import BasePolicyInterface
+from policy_interface.base import BasePolicyInterface
 from go2_ros2_handler import Go2ROS2Handler
 
 ROBOT_SPORT_API_ID_BALANCESTAND = 1002
