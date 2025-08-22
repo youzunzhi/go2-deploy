@@ -382,6 +382,16 @@ class Go2ROS2Handler:
         world_translation = self.cur_pos - self.start_pos
         return world_translation
 
+    def reset_translation_tracking(self):
+        """Reset translation tracking to recapture start position on next odometry message
+        
+        This is useful when switching between policies that require different reference frames
+        or when odometry has drifted and needs to be reset.
+        """
+        if self.enable_translation_capture:
+            self.start_pos_captured = False
+            self.log_info("Translation tracking reset - will recapture start position on next odometry message")
+
     def clip_actions_by_joint_limits(self, robot_coordinates_action):
         """
         Clip actions to ensure joint positions stay within safe limits

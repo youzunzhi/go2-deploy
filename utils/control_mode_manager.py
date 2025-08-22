@@ -1,6 +1,8 @@
 import torch
 from unitree_api.msg import Request
 from utils.hardware_cfgs import STAND_STAGE1_DURATION, STAND_STAGE2_DURATION, STAND_TARGET_POS_STAGE1, STAND_TARGET_POS_STAGE2, WirelessButtons
+from policy_interface.base_policy_interface import BasePolicyInterface
+from go2_ros2_handler import Go2ROS2Handler
 
 ROBOT_SPORT_API_ID_BALANCESTAND = 1002
 ROBOT_SPORT_API_ID_STANDUP = 1004
@@ -18,7 +20,7 @@ class ControlModeManager:
     Flow:
     Sport mode -(L1)-> Stand mode -(Y)-> Locomotion mode -(L2)-> Sport mode
     """
-    def __init__(self, handler, policy_interface):
+    def __init__(self, handler: Go2ROS2Handler, policy_interface: BasePolicyInterface):
         self.handler = handler
         self.policy_interface = policy_interface
         self.which_mode = "sport" # "sport"|"stand"|"locomotion"
@@ -86,6 +88,11 @@ class ControlModeManager:
         """Switch to locomotion policy from other modes"""
         self.which_mode = "locomotion"
         self.policy_interface.policy_iter_counter = 0
+        
+        # Reset translation tracking if the policy uses it to avoid accumulated drift
+        if self.policy_interface.get_translation_config():
+            self.handler.reset_translation_tracking()
+        
         self._show_locomotion_mode_prompts()
 
     def sport_mode_after_locomotion(self):
