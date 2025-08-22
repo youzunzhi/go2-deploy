@@ -1,8 +1,6 @@
 import torch
-import os
 import os.path as osp
 import yaml
-import numpy as np
 from .base import BasePolicyInterface
 from utils import get_joint_map_from_names, parse_default_joint_pos_dict
 from utils.quaternion_utils import quat_rotate_inverse
@@ -18,7 +16,7 @@ class RapidTurnPolicyInterface(BasePolicyInterface):
         # RT policy expects 49-dimensional observations:
         # - Commands: 4 dims (goal segment endpoints: x_l, y_l, x_r, y_r)  
         # - Proprioceptive: 42 dims (ang_vel=3, proj_g=3, joint_pos=12, joint_vel=12, actions=12)
-        # - Privileged linear velocity: 3 dims
+        # - Estimated linear velocity: 3 dims (from neural network estimator)
         self.obs_dim = 49
         self.action_dim = 12
         
@@ -40,14 +38,23 @@ class RapidTurnPolicyInterface(BasePolicyInterface):
             self.agent_config = yaml.load(f, Loader=yaml.UnsafeLoader)
 
     def _load_model(self):
-        """Load the JIT-compiled policy"""
+        """Load the JIT-compiled policy and velocity estimator"""
         policy_path = osp.join(self.logdir, "policy.pt")
         assert osp.exists(policy_path), f"Policy file not found at {policy_path}"
         
         self.policy = torch.jit.load(policy_path, map_location=self.device)
         self.policy.eval()
         
+        # Load velocity estimator
+        estimator_path = osp.join(self.logdir, "estimator.pt")
+        assert osp.exists(estimator_path), f"Estimator file not found at {estimator_path}"
+        
+        # Load JIT-compiled estimator
+        self.estimator = torch.jit.load(estimator_path, map_location=self.device)
+        self.estimator.eval()
+        
         print(f"Loaded RT policy from {policy_path}")
+        print(f"Loaded RT velocity estimator from {estimator_path}")
 
     def _setup_configs(self):
         """Setup configurations for the handler"""
@@ -102,7 +109,6 @@ class RapidTurnPolicyInterface(BasePolicyInterface):
         joint_vel = self.handler.get_dof_vel_obs()            # 12 dims
         last_actions = self.handler.get_last_actions_obs()    # 12 dims
         commands = self._get_rt_commands()                    # 4 dims
-        priv_lin_vel = self.handler.get_base_lin_vel_obs()    # 3 dims (privileged)
         
         # Apply scaling as per RT environment configuration
         ang_vel_scaled = ang_vel * 0.25
@@ -110,7 +116,10 @@ class RapidTurnPolicyInterface(BasePolicyInterface):
         joint_pos_scaled = joint_pos * 1.0
         joint_vel_scaled = joint_vel * 0.05
         
-        # Concatenate observations: commands + scaled proprioception + privileged velocity
+        # Use velocity estimator instead of privileged velocity
+        est_lin_vel = self._get_estimated_linear_velocity()   # 3 dims (estimated)
+        
+        # Concatenate observations: commands + scaled proprioception + estimated velocity
         obs = torch.cat([
             commands,           # 4
             ang_vel_scaled,     # 3
@@ -118,12 +127,42 @@ class RapidTurnPolicyInterface(BasePolicyInterface):
             joint_pos_scaled,   # 12
             joint_vel_scaled,   # 12
             last_actions,       # 12
-            priv_lin_vel        # 3
+            est_lin_vel         # 3
         ], dim=-1)  # Total: 49 dims
         
         assert obs.shape[-1] == self.obs_dim, f"Observation dimension mismatch: {obs.shape[-1]} vs {self.obs_dim}"
         
         return obs
+    
+    def _get_estimated_linear_velocity(self):
+        """Get estimated linear velocity using the neural network estimator"""
+        # Prepare proprioceptive inputs for estimator (42 dims total)
+        ang_vel = self.handler.get_ang_vel_obs()              # 3 dims
+        proj_g = self._get_projected_gravity()                # 3 dims
+        joint_pos = self.handler.get_dof_pos_obs()            # 12 dims  
+        joint_vel = self.handler.get_dof_vel_obs()            # 12 dims
+        last_actions = self.handler.get_last_actions_obs()    # 12 dims
+        
+        # Apply scaling as per RT environment configuration
+        ang_vel_scaled = ang_vel * 0.25
+        proj_g_scaled = proj_g * 0.1  
+        joint_pos_scaled = joint_pos * 1.0
+        joint_vel_scaled = joint_vel * 0.05
+        
+        # Concatenate proprioceptive observations for estimator input
+        proprio_obs = torch.cat([
+            ang_vel_scaled,     # 3
+            proj_g_scaled,      # 3
+            joint_pos_scaled,   # 12
+            joint_vel_scaled,   # 12
+            last_actions        # 12
+        ], dim=-1)  # Total: 42 dims
+        
+        # Run estimator inference
+        with torch.no_grad():
+            est_lin_vel = self.estimator(proprio_obs)
+        
+        return est_lin_vel
 
     def _get_rt_commands(self):
         """Get RT-style commands (goal segment endpoints)"""
