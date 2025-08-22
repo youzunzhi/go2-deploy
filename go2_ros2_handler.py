@@ -272,8 +272,14 @@ class Go2ROS2Handler:
         current_pos = torch.tensor([[position.x, position.y, position.z]],
                                     device=self.device, dtype=torch.float32)
 
+        # Extract orientation from odometry message
+        orientation = msg.pose.pose.orientation
+        current_quat = torch.tensor([[orientation.x, orientation.y, orientation.z, orientation.w]],
+                                     device=self.device, dtype=torch.float32)
+
         # Update current pose
         self.cur_pos = current_pos
+        self.cur_quat = current_quat
 
         # Capture start position and orientation on first message
         if not self.start_pos_captured:
@@ -379,25 +385,24 @@ class Go2ROS2Handler:
         return world_translation
 
     def reset_translation_tracking(self):
-        """Reset translation tracking to recapture start position on next odometry message
+        """Reset translation tracking to use current position as new origin.
         
-        This is useful when switching between policies that require different reference frames
-        or when odometry has drifted and needs to be reset.
+        After reset, get_translation() will return zero until the robot moves
+        from its current position. This is useful when switching between policies
+        or when odometry has drifted.
         """
         assert self.enable_translation_capture, "Translation capture is not enabled."
-
-        # Instead of invalidating, just reset to current position if we have one
-        if hasattr(self, 'cur_pos') and self.cur_pos is not None and hasattr(self, 'start_quat'):
-            # Use current position as new start position
+        
+        # If we have current position and orientation, use them as the new origin immediately
+        if self.start_pos_captured:
+            assert self.cur_pos is not None and self.cur_quat is not None, "Current position and orientation are not available."
             self.start_pos = self.cur_pos.clone()
-            # Get current orientation from base quaternion buffer
-            base_quat = self.get_base_quat_obs()
-            self.start_quat = base_quat.clone()
-            self.log_info("Translation tracking reset - using current position as new start position")
+            self.start_quat = self.cur_quat.clone()
+            self.log_info(f"Translation tracking reset - new origin at position [{self.start_pos[0,0]:.3f}, {self.start_pos[0,1]:.3f}, {self.start_pos[0,2]:.3f}]")
         else:
-            # Fall back to invalidating if no current position available
+            # No position available yet - mark for capture on next odometry
             self.start_pos_captured = False
-            self.log_info("Translation tracking reset - will recapture start position on next odometry message")
+            self.log_info("Translation tracking reset - will capture new origin on next odometry message")
 
     def clip_actions_by_joint_limits(self, robot_coordinates_action):
         """
