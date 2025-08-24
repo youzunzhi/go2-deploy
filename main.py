@@ -174,7 +174,7 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     
-    parser.add_argument("--logdir", type=str, default='weight-and-cfg/ABS', help="The directory which contains the config and model weights files")
+    parser.add_argument("--logdir", type=str, default='weight-and-cfg/ABS/08_23_17-06-28_model_4000', help="The directory which contains the config and model weights files")
     parser.add_argument("--nodryrun", action="store_true", default=False, help="Disable dryrun mode")
     parser.add_argument("--timing_mode", type=str, default="ros_timer",
         choices=["manual_control", "ros_timer"],

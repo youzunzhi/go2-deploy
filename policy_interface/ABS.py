@@ -18,6 +18,9 @@ class ABSPolicyInterface(BasePolicyInterface):
 
         self.warm_up_iter = 10
 
+        # Goal pose in robot's initial frame: x=forward, y=left, z=heading relative to start pose
+        self.goal_pose = torch.tensor([[2.5, 1.0, 0.25]], device=self.device, dtype=torch.float32)
+
     def get_action(self):
         self.policy_iter_counter += 1
         obs = self._get_obs()
@@ -96,9 +99,6 @@ class ABSPolicyInterface(BasePolicyInterface):
         self.clip_obs = env_config["normalization"]["clip_observations"]
         self.clip_actions = env_config["normalization"]["clip_actions"]
         self.obs_scales = env_config["normalization"]["obs_scales"]
-        
-        # Goal pose in robot's initial frame: x=forward, y=left, z=up relative to start pose
-        self.goal_pose = torch.tensor([[2.5, 0.0, 0.0]], device=self.device, dtype=torch.float32)
 
     def _load_model(self):
         # Load TorchScript policy exported from training
